@@ -74,7 +74,7 @@ fun App() {
             NavHost(navController = nav, startDestination = "today") {
                 composable("today") { TodayScreen(nav, splitRepo, workoutRepo, exerciseRepo) }
                 composable("splits") { SplitsScreen(nav, splitRepo, exerciseRepo) }
-                composable("exercises") { ExercisesScreen(exerciseRepo) }
+                composable("exercises") { ExercisesScreen(nav, exerciseRepo) }
                 composable("history") { HistoryScreen(nav, workoutRepo) }
                 composable("progress") { ProgressScreen(nav, workoutRepo, exerciseRepo) }
                 composable("split/{splitId}") { back ->
@@ -88,6 +88,10 @@ fun App() {
                 composable("workout/{sessionId}") { back ->
                     val id = back.arguments?.getString("sessionId") ?: return@composable
                     WorkoutScreen(nav, java.util.UUID.fromString(id), workoutRepo)
+                }
+                composable("exercise/{exerciseId}") { back ->
+                    val id = back.arguments?.getString("exerciseId") ?: return@composable
+                    ExerciseDetailScreen(nav, java.util.UUID.fromString(id), workoutRepo, exerciseRepo)
                 }
             }
         }
