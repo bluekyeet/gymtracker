@@ -64,6 +64,10 @@ class ServerClient(private val context: Context, private val db: AppDatabase) {
         get() = prefs.getString("last_sync_time", null)
         set(value) = prefs.edit().putString("last_sync_time", value).apply()
 
+    var restTimerEnabled: Boolean
+        get() = prefs.getBoolean("rest_timer_enabled", true)
+        set(value) = prefs.edit().putBoolean("rest_timer_enabled", value).apply()
+
     suspend fun refreshAuth(client: HttpClient): Boolean {
         val url = serverUrl.trim().removeSuffix("/")
         val token = refreshToken ?: return false

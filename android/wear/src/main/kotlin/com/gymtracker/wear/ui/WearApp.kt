@@ -340,17 +340,15 @@ fun WearApp() {
                                 )
                                 workoutRepo.saveSet(newSet)
                                 currentSets = workoutRepo.observeSets(weId).first()
-                                restSecondsLeft = 60
-                                restTimerRunning = true
-                                navigateTo("rest_timer")
+                                if (serverClient.restTimerEnabled) {
+                                    restSecondsLeft = 60
+                                    restTimerRunning = true
+                                    navigateTo("rest_timer")
+                                }
                             }
                         },
                         onAddExercise = {
                             pickMode = "add"
-                            navigateTo("pick_exercise")
-                        },
-                        onSwapExercise = {
-                            pickMode = "swap"
                             navigateTo("pick_exercise")
                         },
                         onRemoveExercise = {
@@ -364,18 +362,23 @@ fun WearApp() {
                             }
                         },
                         onFinishWorkout = {
-                            scope.launch {
-                                val session = activeSession
-                                if (session != null) {
-                                    workoutRepo.saveSession(session.copy(endedAt = Instant.now()))
-                                    activeSession = null
-                                    sessionExercises = emptyList()
-                                }
-                                navigateBack()
-                                if (serverClient.serverUrl.isNotBlank()) {
-                                    triggerSync()
+                            deleteConfirmTitle = "Finish Workout?"
+                            deleteConfirmMessage = "Mark workout as done and save it?"
+                            deleteConfirmAction = {
+                                scope.launch {
+                                    val session = activeSession
+                                    if (session != null) {
+                                        workoutRepo.saveSession(session.copy(endedAt = Instant.now()))
+                                        activeSession = null
+                                        sessionExercises = emptyList()
+                                    }
+                                    navigateBack()
+                                    if (serverClient.serverUrl.isNotBlank()) {
+                                        triggerSync()
+                                    }
                                 }
                             }
+                            navigateTo("confirm_delete")
                         }
                     )
                 }
@@ -1791,6 +1794,32 @@ fun WatchSettingsScreen(
         }
 
         item {
+            Spacer(Modifier.height(4.dp))
+            Text("WORKOUT", style = MaterialTheme.typography.caption2, color = MaterialTheme.colors.onSurfaceVariant)
+        }
+        item {
+            var restOn by remember { mutableStateOf(serverClient.restTimerEnabled) }
+            ToggleChip(
+                checked = restOn,
+                onCheckedChange = { on ->
+                    restOn = on
+                    serverClient.restTimerEnabled = on
+                },
+                label = { Text("Rest Timer") },
+                secondaryLabel = { Text(if (restOn) "On after each set" else "Disabled", fontSize = 10.sp) },
+                toggleControl = {
+                    Text(
+                        if (restOn) "✓" else "○",
+                        fontWeight = FontWeight.Bold,
+                        color = if (restOn) MaterialTheme.colors.primary else MaterialTheme.colors.onSurfaceVariant
+                    )
+                },
+                colors = ToggleChipDefaults.toggleChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 1.dp)
+            )
+        }
+
+        item {
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -1877,7 +1906,6 @@ fun WorkoutLoggingScreen(
     onNextExercise: () -> Unit,
     onAddSet: () -> Unit,
     onAddExercise: () -> Unit,
-    onSwapExercise: () -> Unit,
     onRemoveExercise: () -> Unit,
     onFinishWorkout: () -> Unit
 ) {
@@ -1915,26 +1943,6 @@ fun WorkoutLoggingScreen(
                 style = MaterialTheme.typography.caption2,
                 color = MaterialTheme.colors.onSurfaceVariant
             )
-        }
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(0.85f).padding(vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                CompactButton(
-                    onClick = onPrevExercise,
-                    enabled = exerciseIndex > 0
-                ) {
-                    Text("<")
-                }
-                CompactButton(
-                    onClick = onNextExercise,
-                    enabled = exerciseIndex < totalExercises - 1
-                ) {
-                    Text(">")
-                }
-            }
         }
 
         item {
@@ -2001,6 +2009,28 @@ fun WorkoutLoggingScreen(
             }
         }
 
+        // Exercise navigation arrows — below the LOG SET button
+        item {
+            Spacer(Modifier.height(2.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(0.85f).padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                CompactButton(
+                    onClick = onPrevExercise,
+                    enabled = exerciseIndex > 0
+                ) {
+                    Text("< Prev")
+                }
+                CompactButton(
+                    onClick = onNextExercise,
+                    enabled = exerciseIndex < totalExercises - 1
+                ) {
+                    Text("Next >")
+                }
+            }
+        }
+
         item {
             Spacer(Modifier.height(4.dp))
             Row(
@@ -2010,11 +2040,6 @@ fun WorkoutLoggingScreen(
                 CompactChip(
                     onClick = onAddExercise,
                     label = { Text("+Add", fontSize = 10.sp) },
-                    modifier = Modifier.weight(1f)
-                )
-                CompactChip(
-                    onClick = onSwapExercise,
-                    label = { Text("Swap", fontSize = 10.sp) },
                     modifier = Modifier.weight(1f)
                 )
                 CompactChip(
