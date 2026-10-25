@@ -1,0 +1,10 @@
+openapi: 3.1.0
+info:
+  title: Gym Tracker API
+  version: 0.1.0
+paths:
+  /v1/health:
+    get:
+      responses:
+        '200':
+          description: OK

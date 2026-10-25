@@ -1,0 +1,29 @@
+# .gitignore
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+out/
+
+# Android
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Backend / JVM
+*.class
+
+# Web
+web/node_modules/
+web/.svelte-kit/
+web/build/
+
+# Env
+.env
+!.env.example
+
+# Logs
+*.log
