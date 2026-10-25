@@ -1,8 +1,16 @@
+@file:UseSerializers(
+    com.gymtracker.shared.domain.UUIDSerializer::class,
+    com.gymtracker.shared.domain.InstantSerializer::class
+)
+
 package com.gymtracker.shared.domain
 
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.UseSerializers
 import java.time.Instant
 import java.util.UUID
 
+@Serializable
 data class Exercise(
     val id: UUID,
     val userId: UUID? = null,
@@ -17,6 +25,7 @@ data class Exercise(
     val deletedAt: Instant? = null
 )
 
+@Serializable
 data class Split(
     val id: UUID,
     val userId: UUID,
@@ -29,6 +38,7 @@ data class Split(
     val deletedAt: Instant? = null
 )
 
+@Serializable
 data class SplitDay(
     val id: UUID,
     val splitId: UUID,
@@ -41,6 +51,7 @@ data class SplitDay(
     val deletedAt: Instant? = null
 )
 
+@Serializable
 data class SplitDayExercise(
     val id: UUID,
     val splitDayId: UUID,
@@ -54,6 +65,7 @@ data class SplitDayExercise(
     val deletedAt: Instant? = null
 )
 
+@Serializable
 data class WorkoutSession(
     val id: UUID,
     val userId: UUID,
@@ -68,6 +80,7 @@ data class WorkoutSession(
     val deletedAt: Instant? = null
 )
 
+@Serializable
 data class WorkoutExercise(
     val id: UUID,
     val sessionId: UUID,
@@ -80,6 +93,7 @@ data class WorkoutExercise(
     val deletedAt: Instant? = null
 )
 
+@Serializable
 data class SetEntry(
     val id: UUID,
     val workoutExerciseId: UUID,
@@ -94,6 +108,7 @@ data class SetEntry(
     val deletedAt: Instant? = null
 )
 
+@Serializable
 data class BodyWeight(
     val id: UUID,
     val userId: UUID,
