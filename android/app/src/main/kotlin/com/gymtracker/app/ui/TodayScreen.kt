@@ -14,6 +14,8 @@ import androidx.navigation.NavController
 import com.gymtracker.data.repository.ExerciseRepository
 import com.gymtracker.data.repository.SplitRepository
 import com.gymtracker.data.repository.WorkoutRepository
+import com.gymtracker.shared.domain.SetEntry
+import com.gymtracker.shared.domain.SetType
 import com.gymtracker.shared.domain.SplitDay
 import com.gymtracker.shared.domain.WorkoutExercise
 import com.gymtracker.shared.domain.WorkoutSession
@@ -296,15 +298,32 @@ private suspend fun startWorkout(
     val splitExercises = splitRepo.observeDayExercises(day.id).first()
     splitExercises.forEach { se ->
         val ex = se.exerciseId?.let { exerciseRepo.getById(it) }
+        val workoutExerciseId = UUID.randomUUID()
         workoutRepo.saveExercise(
             WorkoutExercise(
-                id = UUID.randomUUID(),
+                id = workoutExerciseId,
                 sessionId = session.id,
                 exerciseId = se.exerciseId,
                 exerciseName = ex?.name ?: "Exercise",
                 sortKey = se.sortKey
             )
         )
+        // Pre-fill the recommended sets so the workout opens ready to log.
+        val targetSets = se.targetSets
+        if (targetSets != null && targetSets in 1..50) {
+            repeat(targetSets) { index ->
+                workoutRepo.saveSet(
+                    SetEntry(
+                        id = UUID.randomUUID(),
+                        workoutExerciseId = workoutExerciseId,
+                        setNumber = index + 1,
+                        weightKg = 0.0,
+                        reps = se.targetReps ?: 0,
+                        setType = SetType.WORKING
+                    )
+                )
+            }
+        }
     }
     nav.navigate("workout/${session.id}")
 }

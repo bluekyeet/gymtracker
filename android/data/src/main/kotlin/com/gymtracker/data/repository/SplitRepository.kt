@@ -27,6 +27,8 @@ class SplitRepository(private val db: AppDatabase) {
     fun observeDays(splitId: UUID): Flow<List<SplitDay>> =
         db.splitDayDao().getBySplit(splitId).map { it.map { e -> e.toDomain() } }
 
+    suspend fun getDay(id: UUID): SplitDay? = db.splitDayDao().getById(id)?.toDomain()
+
     suspend fun saveDay(day: SplitDay) = db.splitDayDao().upsert(day.toEntity())
 
     suspend fun softDeleteDay(id: UUID) {
