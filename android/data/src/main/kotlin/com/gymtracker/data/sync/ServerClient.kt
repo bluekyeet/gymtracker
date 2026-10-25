@@ -32,7 +32,12 @@ data class EnrollResponse(
 )
 
 class ServerClient(private val context: Context, private val db: AppDatabase) {
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json { 
+        ignoreUnknownKeys = true 
+        isLenient = true
+        coerceInputValues = true
+        explicitNulls = false
+    }
     private val prefs = context.getSharedPreferences("server_config", Context.MODE_PRIVATE)
 
     var serverUrl: String
@@ -51,18 +56,73 @@ class ServerClient(private val context: Context, private val db: AppDatabase) {
         get() = prefs.getString("device_id", null)
         set(value) = prefs.edit().putString("device_id", value).apply()
 
+    var pairedWatchDeviceId: String?
+        get() = prefs.getString("paired_watch_device_id", null)
+        set(value) = prefs.edit().putString("paired_watch_device_id", value).apply()
+
+    var lastSyncTime: String?
+        get() = prefs.getString("last_sync_time", null)
+        set(value) = prefs.edit().putString("last_sync_time", value).apply()
+
+    suspend fun refreshAuth(client: HttpClient): Boolean {
+        val url = serverUrl.trim().removeSuffix("/")
+        val token = refreshToken ?: return false
+        return try {
+            val resp = client.post("$url/v1/auth/refresh") {
+                contentType(ContentType.Application.Json)
+                setBody(mapOf("refreshToken" to token))
+            }
+            if (resp.status == HttpStatusCode.OK) {
+                val data = resp.body<EnrollResponse>()
+                accessToken = data.accessToken
+                refreshToken = data.refreshToken
+                deviceId = data.deviceId
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun ensureValidToken(client: HttpClient, defaultEnrollmentKey: String = "k7m2-x9qd-4hrt-wc3f-p8ze-n6ay"): String? {
+        val currentToken = accessToken
+        if (!currentToken.isNullOrBlank()) {
+            return currentToken
+        }
+        if (!refreshToken.isNullOrBlank()) {
+            if (refreshAuth(client)) {
+                return accessToken
+            }
+        }
+        val url = serverUrl.trim()
+        if (url.isNotBlank()) {
+            try {
+                val enrolled = enroll(url, defaultEnrollmentKey, android.os.Build.MODEL, client)
+                return enrolled.accessToken
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
     suspend fun checkHealth(url: String, client: HttpClient): HealthResponse {
-        val resp = client.get("$url/v1/health")
-        return resp.body<HealthResponse>()
+        val trimmed = url.trim()
+        val cleanUrl = if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) "http://$trimmed" else trimmed
+        val finalUrl = cleanUrl.removeSuffix("/")
+        return client.get("$finalUrl/v1/health").body<HealthResponse>()
     }
 
     suspend fun enroll(url: String, enrollmentKey: String, deviceName: String, client: HttpClient): EnrollResponse {
-        val resp = client.post("$url/v1/devices/enroll") {
+        val trimmed = url.trim()
+        val cleanUrl = if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) "http://$trimmed" else trimmed
+        val finalUrl = cleanUrl.removeSuffix("/")
+        val resp = client.post("$finalUrl/v1/devices/enroll") {
             contentType(ContentType.Application.Json)
             setBody(EnrollRequest(enrollmentKey, deviceName, "phone"))
         }
         val data = resp.body<EnrollResponse>()
-        serverUrl = url
+        serverUrl = finalUrl
         accessToken = data.accessToken
         refreshToken = data.refreshToken
         deviceId = data.deviceId
