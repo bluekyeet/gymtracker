@@ -1,0 +1,11 @@
+.git
+.gradle
+.idea
+.svelte-kit
+build
+*/build
+android/*/build
+backend/build
+web/node_modules
+web/build
+gradle.properties

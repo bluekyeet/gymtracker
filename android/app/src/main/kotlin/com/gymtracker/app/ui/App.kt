@@ -6,9 +6,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
-import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -43,10 +44,11 @@ fun App() {
     LaunchedEffect(Unit) { exerciseRepo.seedBuiltinsIfNeeded() }
     val items = listOf(
         "today" to Icons.Filled.FitnessCenter,
-        "splits" to Icons.Filled.ViewList,
+        "splits" to Icons.Filled.List,
         "exercises" to Icons.Filled.Person,
         "history" to Icons.Filled.History,
-        "progress" to Icons.Filled.ShowChart
+        "progress" to Icons.Filled.ShowChart,
+        "settings" to Icons.Filled.Settings
     )
     Scaffold(
         bottomBar = {
@@ -77,6 +79,7 @@ fun App() {
                 composable("exercises") { ExercisesScreen(nav, exerciseRepo) }
                 composable("history") { HistoryScreen(nav, workoutRepo) }
                 composable("progress") { ProgressScreen(nav, workoutRepo, exerciseRepo) }
+                composable("settings") { SettingsScreen(nav) }
                 composable("split/{splitId}") { back ->
                     val id = back.arguments?.getString("splitId") ?: return@composable
                     SplitDetailScreen(nav, splitRepo, java.util.UUID.fromString(id))

@@ -22,7 +22,7 @@ val exposedVersion = "0.56.0"
 val flywayVersion = "10.20.1"
 
 dependencies {
-    implementation("com.gymtracker:shared:0.1.0")
+    implementation(project(":shared"))
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
     implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")

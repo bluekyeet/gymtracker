@@ -37,7 +37,10 @@ android {
 dependencies {
     implementation(project(":data"))
     implementation("com.gymtracker:shared:0.1.0")
-    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("io.ktor:ktor-client-core:3.0.3")
+    implementation("io.ktor:ktor-client-okhttp:3.0.3")
+    implementation("io.ktor:ktor-client-content-negotiation:3.0.3")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation(platform("androidx.compose:compose-bom:2024.10.00"))
     implementation("androidx.compose.ui:ui")
