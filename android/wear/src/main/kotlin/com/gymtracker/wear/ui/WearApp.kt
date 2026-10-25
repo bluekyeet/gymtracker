@@ -139,13 +139,14 @@ fun WearApp() {
     fun launchSystemKeyboard(label: String, onResult: (String) -> Unit) {
         onTextResultAction = onResult
         try {
-            val intent = Intent("com.google.android.wearable.input.action.REMOTE_INPUT")
             val remoteInput = RemoteInput.Builder("input_text")
                 .setLabel(label)
                 .build()
-            intent.putExtra("android.intent.extra.remote_inputs", arrayOf(remoteInput))
+            val intent = androidx.wear.input.RemoteInputIntentHelper.createActionRemoteInputIntent()
+            androidx.wear.input.RemoteInputIntentHelper.putRemoteInputsExtra(intent, listOf(remoteInput))
             remoteInputLauncher.launch(intent)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // Fallback for emulator if remote input intent is unresolvable
         }
     }
 
