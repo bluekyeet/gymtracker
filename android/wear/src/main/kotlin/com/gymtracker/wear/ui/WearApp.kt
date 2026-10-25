@@ -1197,7 +1197,7 @@ fun DayOptionsScreen(
         item {
             Chip(
                 onClick = onRenameDay,
-                label = { Text("Rename Day") },
+                label = { Text("Edit Day & Weekdays") },
                 colors = ChipDefaults.secondaryChipColors(),
                 modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
             )
@@ -1535,17 +1535,10 @@ fun DayInputScreen(
     onCancel: () -> Unit
 ) {
     var dayName by remember { mutableStateOf(initialName) }
-    var selectedWeekdays by remember { mutableStateOf(initialWeekdays.toSet()) }
-
-    val weekdayMap = listOf(
-        1 to "Mon",
-        2 to "Tue",
-        3 to "Wed",
-        4 to "Thu",
-        5 to "Fri",
-        6 to "Sat",
-        7 to "Sun"
-    )
+    // Use a List<Boolean> indexed 0=Mon..6=Sun so each item slot sees its own stable state slot
+    var weekdayFlags by remember {
+        mutableStateOf(List(7) { i -> initialWeekdays.contains(i + 1) })
+    }
 
     ScalingLazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1556,17 +1549,19 @@ fun DayInputScreen(
         item {
             Text(title, style = MaterialTheme.typography.title3, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        item {
-            Spacer(Modifier.height(4.dp))
-        }
+        item { Spacer(Modifier.height(4.dp)) }
         item {
             Chip(
                 onClick = {
-                    onLaunchKeyboard("Day Name") { typed ->
-                        dayName = typed
-                    }
+                    onLaunchKeyboard("Day Name") { typed -> dayName = typed }
                 },
-                label = { Text(if (dayName.isBlank()) "⌨ Type Day Name..." else dayName, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (dayName.isBlank()) MaterialTheme.colors.onSurfaceVariant else MaterialTheme.colors.primary) },
+                label = {
+                    Text(
+                        if (dayName.isBlank()) "⌨ Type Day Name..." else dayName,
+                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = if (dayName.isBlank()) MaterialTheme.colors.onSurfaceVariant else MaterialTheme.colors.primary
+                    )
+                },
                 colors = ChipDefaults.secondaryChipColors(),
                 modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
             )
@@ -1575,25 +1570,38 @@ fun DayInputScreen(
             Spacer(Modifier.height(4.dp))
             Text("WEEKDAYS", style = MaterialTheme.typography.caption2, color = MaterialTheme.colors.onSurfaceVariant)
         }
-        items(weekdayMap.size) { idx ->
-            val (dayNum, dayLabel) = weekdayMap[idx]
-            val isSelected = selectedWeekdays.contains(dayNum)
-            ToggleChip(
-                checked = isSelected,
-                onCheckedChange = { checked ->
-                    selectedWeekdays = if (checked) selectedWeekdays + dayNum else selectedWeekdays - dayNum
-                },
-                label = { Text(dayLabel) },
-                toggleControl = { Text(if (isSelected) "✓" else "  ", fontWeight = FontWeight.Bold, color = MaterialTheme.colors.primary) },
-                colors = ToggleChipDefaults.toggleChipColors(),
-                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 1.dp)
-            )
+        // 7 explicit items — one per weekday — each reads its own index from the list
+        val dayLabels = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        for (i in 0..6) {
+            item(key = i) {
+                val label = dayLabels[i]
+                val checked = weekdayFlags[i]
+                ToggleChip(
+                    checked = checked,
+                    onCheckedChange = { on ->
+                        weekdayFlags = weekdayFlags.toMutableList().also { it[i] = on }
+                    },
+                    label = { Text(label) },
+                    toggleControl = {
+                        Text(
+                            if (checked) "✓" else "○",
+                            fontWeight = FontWeight.Bold,
+                            color = if (checked) MaterialTheme.colors.primary else MaterialTheme.colors.onSurfaceVariant
+                        )
+                    },
+                    colors = ToggleChipDefaults.toggleChipColors(),
+                    modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 1.dp)
+                )
+            }
         }
         item {
             Spacer(Modifier.height(6.dp))
             Button(
                 enabled = dayName.isNotBlank(),
-                onClick = { onConfirm(dayName.trim(), selectedWeekdays.sorted()) },
+                onClick = {
+                    val selected = weekdayFlags.mapIndexedNotNull { i, on -> if (on) i + 1 else null }
+                    onConfirm(dayName.trim(), selected)
+                },
                 modifier = Modifier.fillMaxWidth(0.85f).height(36.dp)
             ) {
                 Text("Save Day", fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1601,10 +1609,7 @@ fun DayInputScreen(
         }
         item {
             Spacer(Modifier.height(4.dp))
-            CompactChip(
-                onClick = onCancel,
-                label = { Text("Cancel", textAlign = TextAlign.Center) }
-            )
+            CompactChip(onClick = onCancel, label = { Text("Cancel", textAlign = TextAlign.Center) })
         }
     }
 }
