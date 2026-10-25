@@ -644,7 +644,7 @@ fun WearApp() {
                 onAddCustomExercise = {
                     nameInputTitle = "Custom Exercise Name"
                     nameInputInitialValue = ""
-                    nameInputPresets = listOf("Incline Bench Press", "Romanian Deadlift", "Bulgarian Split Squat", "Lat Pulldown", "Cable Flyes", "Preacher Curl")
+                    nameInputPresets = emptyList()
                     nameInputConfirmAction = { customName ->
                         scope.launch {
                             val newEx = Exercise(
@@ -689,7 +689,6 @@ fun WearApp() {
                 title = dayInputTitle,
                 initialName = dayInputInitialName,
                 initialWeekdays = dayInputInitialWeekdays,
-                presets = dayInputPresets,
                 onLaunchKeyboard = ::launchSystemKeyboard,
                 onConfirm = { name, weekdays ->
                     dayInputConfirmAction?.invoke(name, weekdays)
@@ -1530,7 +1529,6 @@ fun DayInputScreen(
     title: String,
     initialName: String,
     initialWeekdays: List<Int>,
-    presets: List<String>,
     onLaunchKeyboard: (String, (String) -> Unit) -> Unit,
     onConfirm: (String, List<Int>) -> Unit,
     onCancel: () -> Unit
@@ -1599,22 +1597,6 @@ fun DayInputScreen(
             ) {
                 Text("Save Day", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
-        }
-        item {
-            Spacer(Modifier.height(4.dp))
-            Text("OR SELECT PRESET", style = MaterialTheme.typography.caption2, color = MaterialTheme.colors.onSurfaceVariant)
-        }
-        items(presets.size) { idx ->
-            val preset = presets[idx]
-            Chip(
-                onClick = {
-                    if (dayName.isBlank()) dayName = preset
-                    onConfirm(preset, selectedWeekdays.sorted())
-                },
-                label = { Text(preset, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                colors = ChipDefaults.secondaryChipColors(),
-                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
-            )
         }
         item {
             Spacer(Modifier.height(4.dp))
