@@ -13,6 +13,7 @@ data class ExerciseEntity(
     val userId: UUID? = null,
     val name: String,
     val muscleGroup: MuscleGroup? = null,
+    val customGroup: String? = null,
     val equipment: Equipment? = null,
     val isCustom: Boolean = false,
     val revision: Long = 0,

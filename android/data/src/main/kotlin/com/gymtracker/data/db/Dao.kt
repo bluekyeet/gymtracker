@@ -113,6 +113,20 @@ interface WorkoutExerciseDao {
     @Query("SELECT * FROM workout_exercises WHERE id = :id")
     suspend fun getById(id: UUID): WorkoutExerciseEntity?
 
+    /** The most recent session, before [before], that contains [exerciseId]. */
+    @Query(
+        """
+        SELECT s.id FROM workout_sessions s
+        JOIN workout_exercises we ON we.sessionId = s.id
+        WHERE we.exerciseId = :exerciseId
+          AND s.deletedAt IS NULL AND we.deletedAt IS NULL
+          AND s.startedAt < :before
+        ORDER BY s.startedAt DESC
+        LIMIT 1
+        """
+    )
+    suspend fun getLatestSessionIdFor(exerciseId: UUID, before: Instant): UUID?
+
     @Upsert
     suspend fun upsert(entity: WorkoutExerciseEntity)
 
@@ -127,6 +141,9 @@ interface WorkoutExerciseDao {
 interface SetDao {
     @Query("SELECT * FROM sets WHERE workoutExerciseId = :workoutExerciseId AND deletedAt IS NULL ORDER BY setNumber")
     fun getByWorkoutExercise(workoutExerciseId: UUID): Flow<List<SetEntity>>
+
+    @Query("SELECT * FROM sets WHERE workoutExerciseId = :workoutExerciseId AND deletedAt IS NULL ORDER BY setNumber")
+    suspend fun listByWorkoutExercise(workoutExerciseId: UUID): List<SetEntity>
 
     @Query("SELECT * FROM sets WHERE id = :id")
     suspend fun getById(id: UUID): SetEntity?

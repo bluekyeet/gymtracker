@@ -16,7 +16,7 @@ import androidx.room.TypeConverters
         BodyWeightEntity::class,
         OutboxEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

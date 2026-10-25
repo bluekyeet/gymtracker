@@ -20,6 +20,18 @@ object DatabaseProvider {
         }
     }
 
+    /**
+     * v2 -> v3: exercises gained a `customGroup` column, the free-form muscle group name
+     * the user typed when creating their own group. Nullable, added only when missing.
+     */
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            if (!database.hasColumn("exercises", "customGroup")) {
+                database.execSQL("ALTER TABLE exercises ADD COLUMN customGroup TEXT")
+            }
+        }
+    }
+
     private fun SupportSQLiteDatabase.hasColumn(table: String, column: String): Boolean {
         query("PRAGMA table_info(`$table`)").use { cursor ->
             val nameIndex = cursor.getColumnIndex("name")
@@ -39,7 +51,7 @@ object DatabaseProvider {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "gymtracker.db"
-            ).addMigrations(MIGRATION_1_2)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build().also { instance = it }
         }
     }

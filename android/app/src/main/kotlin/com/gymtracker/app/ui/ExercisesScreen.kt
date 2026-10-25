@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,10 +16,23 @@ import androidx.navigation.NavController
 import com.gymtracker.data.repository.ExerciseRepository
 import com.gymtracker.shared.domain.Exercise
 import com.gymtracker.shared.domain.MuscleGroup
+import com.gymtracker.shared.domain.fuzzyFilter
+import com.gymtracker.shared.domain.fuzzyScore
+import com.gymtracker.shared.domain.groupName
+import com.gymtracker.shared.domain.label
+import com.gymtracker.shared.domain.resolveGroup
 import kotlinx.coroutines.launch
 import java.util.UUID
 
 private data class ExerciseSection(val title: String, val exercises: List<Exercise>)
+
+/** Built-in groups in enum order, the user's own groups after them, each alphabetical. */
+private fun compareGroups(a: String, b: String): Int {
+    val aOrder = MuscleGroup.values().firstOrNull { it.label.equals(a, ignoreCase = true) }?.ordinal ?: Int.MAX_VALUE
+    val bOrder = MuscleGroup.values().firstOrNull { it.label.equals(b, ignoreCase = true) }?.ordinal ?: Int.MAX_VALUE
+    if (aOrder != bOrder) return aOrder - bOrder
+    return a.lowercase().compareTo(b.lowercase())
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -26,78 +41,51 @@ fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
     val scope = rememberCoroutineScope()
 
     var query by remember { mutableStateOf("") }
-    var groupFilter by remember { mutableStateOf<MuscleGroup?>(null) }
-    var newName by remember { mutableStateOf("") }
+    var groupFilter by remember { mutableStateOf<String?>(null) }
+    var creating by remember { mutableStateOf(false) }
     var toDelete by remember { mutableStateOf<Exercise?>(null) }
 
-    val visible = exercises.filter {
-        it.name.contains(query.trim(), ignoreCase = true) &&
-            (groupFilter == null || it.muscleGroup == groupFilter)
-    }
+    // Fuzzy match on the name or the group, so "ch" finds everything in Chest.
+    val visible = exercises
+        .filter { groupFilter == null || it.groupName == groupFilter }
+        .filter { query.isBlank() || fuzzyScore(query, it.name) != null || fuzzyScore(query, it.groupName ?: "") != null }
+        .fuzzyFilter(query) { it.name }
 
-    // One section per muscle group, in enum order, exercises alphabetical inside.
+    val presentGroups = exercises.mapNotNull { it.groupName }.distinct()
+        .sortedWith(Comparator { a, b -> compareGroups(a, b) })
+
     val sections = visible
-        .groupBy { it.muscleGroup }
+        .groupBy { it.groupName ?: "Other" }
         .entries
-        .sortedBy { it.key?.ordinal ?: Int.MAX_VALUE }
+        .sortedWith(Comparator { a, b -> compareGroups(a.key, b.key) })
         .map { (group, list) ->
-            ExerciseSection(
-                title = group?.name?.lowercase()?.replaceFirstChar { c -> c.uppercase() } ?: "Other",
-                exercises = list.sortedBy { it.name.lowercase() }
-            )
+            ExerciseSection(title = group, exercises = list.sortedBy { it.name.lowercase() })
         }
-
-    val presentGroups = exercises
-        .mapNotNull { it.muscleGroup }
-        .distinct()
-        .sortedBy { it.ordinal }
-
-    fun addExercise() {
-        val name = newName.trim()
-        if (name.isBlank()) return
-        if (exercises.any { it.name.equals(name, ignoreCase = true) }) {
-            newName = ""
-            return
-        }
-        scope.launch {
-            exerciseRepo.save(Exercise(id = UUID.randomUUID(), name = name, isCustom = true))
-            newName = ""
-        }
-    }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Exercise Library", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "${exercises.size} exercise${if (exercises.size == 1) "" else "s"}",
-            style = MaterialTheme.typography.bodySmall
-        )
-        Spacer(Modifier.height(12.dp))
-
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = newName,
-                onValueChange = { newName = it },
-                label = { Text("New exercise") },
-                modifier = Modifier.weight(1f),
-                singleLine = true
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = { addExercise() }, enabled = newName.isNotBlank()) { Text("Add") }
+            Column(Modifier.weight(1f)) {
+                Text("Exercise Library", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    "${exercises.size} exercise${if (exercises.size == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            IconButton(onClick = { creating = true }) {
+                Icon(Icons.Filled.Add, contentDescription = "New exercise")
+            }
         }
+        Spacer(Modifier.height(8.dp))
 
-        if (exercises.size >= 6) {
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                label = { Text("Search") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-        }
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("Search") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
 
-        if (exercises.isNotEmpty() && presentGroups.isNotEmpty()) {
+        if (presentGroups.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(
@@ -109,7 +97,7 @@ fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
                     FilterChip(
                         selected = groupFilter == g,
                         onClick = { groupFilter = if (groupFilter == g) null else g },
-                        label = { Text(g.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                        label = { Text(g) }
                     )
                 }
             }
@@ -119,12 +107,12 @@ fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
 
         when {
             exercises.isEmpty() -> Text(
-                "No exercises yet. They are created automatically on first launch.",
+                "No exercises yet. Tap + to add one.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             visible.isEmpty() -> Text(
-                "No exercise matches \"${query.ifBlank { groupFilter?.name ?: "" }}\".",
+                "No exercise matches \"${query.ifBlank { groupFilter ?: "" }}\".",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -147,12 +135,19 @@ fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
                                 .fillMaxWidth()
                                 .clickable { nav.navigate("exercise/${ex.id}") }
                         ) {
-                            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(ex.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        ex.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
                                     Spacer(Modifier.height(2.dp))
                                     Text(
-                                        text = ex.muscleGroup?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "No muscle group",
+                                        text = ex.groupName ?: "No muscle group",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.primary
                                     )
@@ -164,6 +159,30 @@ fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
                 }
             }
         }
+    }
+
+    if (creating) {
+        NewExerciseDialog(
+            exercises = exercises,
+            onConfirm = { name, groupLabel ->
+                scope.launch {
+                    if (exercises.none { it.name.equals(name, ignoreCase = true) }) {
+                        val (builtIn, custom) = resolveGroup(groupLabel)
+                        exerciseRepo.save(
+                            Exercise(
+                                id = UUID.randomUUID(),
+                                name = name,
+                                muscleGroup = builtIn,
+                                customGroup = custom,
+                                isCustom = true
+                            )
+                        )
+                    }
+                    creating = false
+                }
+            },
+            onDismiss = { creating = false }
+        )
     }
 
     if (toDelete != null) {

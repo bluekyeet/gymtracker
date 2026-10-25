@@ -16,6 +16,8 @@ import com.gymtracker.data.repository.ExerciseRepository
 import com.gymtracker.data.repository.WorkoutRepository
 import com.gymtracker.shared.domain.Calculations
 import com.gymtracker.shared.domain.SetEntry
+import com.gymtracker.shared.domain.fuzzyScore
+import com.gymtracker.shared.domain.groupName
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
@@ -136,7 +138,21 @@ fun ProgressScreen(nav: NavController, workoutRepo: WorkoutRepository, exerciseR
 
         var menuOpen by remember { mutableStateOf(false) }
         var exerciseQuery by remember { mutableStateOf("") }
-        val matched = exercises.filter { it.name.contains(exerciseQuery.trim(), ignoreCase = true) }
+        // Fuzzy on the name or the group, best match first.
+        val matched = if (exerciseQuery.isBlank()) {
+            exercises
+        } else {
+            exercises
+                .mapNotNull { ex ->
+                    val best = listOfNotNull(
+                        fuzzyScore(exerciseQuery, ex.name),
+                        ex.groupName?.let { fuzzyScore(exerciseQuery, it) }
+                    ).maxOrNull()
+                    best?.let { it to ex }
+                }
+                .sortedByDescending { it.first }
+                .map { it.second }
+        }
 
         ExposedDropdownMenuBox(
             expanded = menuOpen,
@@ -158,20 +174,18 @@ fun ProgressScreen(nav: NavController, workoutRepo: WorkoutRepository, exerciseR
                 onDismissRequest = { menuOpen = false },
                 modifier = Modifier.exposedDropdownSize()
             ) {
-                if (exercises.size >= 8) {
-                    DropdownMenuItem(
-                        text = {
-                            OutlinedTextField(
-                                value = exerciseQuery,
-                                onValueChange = { exerciseQuery = it },
-                                label = { Text("Search") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        },
-                        onClick = {}
-                    )
-                }
+                DropdownMenuItem(
+                    text = {
+                        OutlinedTextField(
+                            value = exerciseQuery,
+                            onValueChange = { exerciseQuery = it },
+                            label = { Text("Search") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    onClick = {}
+                )
                 if (matched.isEmpty()) {
                     DropdownMenuItem(
                         text = { Text("No match", color = MaterialTheme.colorScheme.onSurfaceVariant) },
@@ -184,7 +198,7 @@ fun ProgressScreen(nav: NavController, workoutRepo: WorkoutRepository, exerciseR
                             Column {
                                 Text(ex.name, fontWeight = FontWeight.SemiBold)
                                 Text(
-                                    ex.muscleGroup?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "No muscle group",
+                                    ex.groupName ?: "No muscle group",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )

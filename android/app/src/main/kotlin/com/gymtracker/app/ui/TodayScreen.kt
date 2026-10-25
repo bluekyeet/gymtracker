@@ -154,12 +154,28 @@ fun TodayScreen(
                             .padding(vertical = 2.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                     ) {
-                        Text(
-                            text = ex?.name ?: "Exercise",
-                            modifier = Modifier.padding(12.dp),
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = ex?.name ?: "Exercise",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            val setsText = de.targetSets?.let { s -> de.targetReps?.let { r -> "$s × $r" } ?: "$s sets" } ?: ""
+                            if (setsText.isNotEmpty()) {
+                                Text(
+                                    text = setsText,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
                 }
                 Spacer(Modifier.height(16.dp))

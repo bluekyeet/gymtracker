@@ -8,6 +8,7 @@ data class Exercise(
     val userId: UUID? = null,
     val name: String,
     val muscleGroup: MuscleGroup? = null,
+    val customGroup: String? = null,
     val equipment: Equipment? = null,
     val isCustom: Boolean = false,
     val revision: Long = 0,
@@ -102,4 +103,12 @@ data class BodyWeight(
     val createdAt: Instant = Instant.now(),
     val updatedAt: Instant = Instant.now(),
     val deletedAt: Instant? = null
+)
+
+/** One past workout of a single exercise, as the exercise detail screen shows it. */
+data class ExerciseHistoryRow(
+    val session: WorkoutSession,
+    val sets: List<SetEntry>,
+    val topSet: SetEntry?,
+    val e1rm: Double?
 )

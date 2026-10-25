@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -17,10 +15,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.gymtracker.data.repository.ExerciseRepository
 import com.gymtracker.data.repository.WorkoutRepository
-import com.gymtracker.shared.domain.Calculations
 import com.gymtracker.shared.domain.Exercise
-import com.gymtracker.shared.domain.SetEntry
-import com.gymtracker.shared.domain.WorkoutSession
+import com.gymtracker.shared.domain.ExerciseHistoryRow
+import com.gymtracker.shared.domain.groupName
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
@@ -30,19 +27,10 @@ import com.patrykandpatrick.vico.core.cartesian.data.AxisValueOverrider
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
-import kotlinx.coroutines.flow.first
-import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 import kotlin.math.roundToInt
-
-private data class HistoryRow(
-    val session: WorkoutSession,
-    val sets: List<SetEntry>,
-    val topSet: SetEntry?,
-    val e1rm: Double?
-)
 
 @Composable
 fun ExerciseDetailScreen(
@@ -52,7 +40,7 @@ fun ExerciseDetailScreen(
     exerciseRepo: ExerciseRepository
 ) {
     var exercise by remember { mutableStateOf<Exercise?>(null) }
-    var history by remember { mutableStateOf<List<HistoryRow>>(emptyList()) }
+    var history by remember { mutableStateOf<List<ExerciseHistoryRow>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
 
     val modelProducer = remember { CartesianChartModelProducer() }
@@ -60,32 +48,19 @@ fun ExerciseDetailScreen(
     LaunchedEffect(exerciseId) {
         loading = true
         exercise = exerciseRepo.getById(exerciseId)
-        val sessions = workoutRepo.observeSessions().first()
-        val rows = mutableListOf<HistoryRow>()
-        sessions.forEach { s ->
-            val forThis = workoutRepo.observeExercises(s.id).first().filter { it.exerciseId == exerciseId }
-            if (forThis.isNotEmpty()) {
-                val sets = forThis.flatMap { workoutRepo.observeSets(it.id).first() }
-                if (sets.isNotEmpty()) {
-                    rows += HistoryRow(
-                        session = s,
-                        sets = sets,
-                        topSet = sets.filter { it.weightKg != null }.maxByOrNull { it.weightKg ?: 0.0 },
-                        e1rm = Calculations.bestEstimatedOneRepMax(sets)
-                    )
-                }
-            }
-        }
-        history = rows.sortedBy { it.session.startedAt }
+        history = workoutRepo.historyForExercise(exerciseId)
         loading = false
     }
 
-    LaunchedEffect(history) {
-        if (history.size >= 2) {
+    // Sessions with no weight logged have nothing to plot.
+    val chartRows = history.filter { (it.topSet?.weightKg ?: 0.0) > 0.0 }
+
+    LaunchedEffect(chartRows) {
+        if (chartRows.size >= 2) {
             modelProducer.runTransaction {
                 lineSeries {
-                    series(history.map { (it.topSet?.weightKg ?: 0.0) })
-                    series(history.map { it.e1rm ?: 0.0 })
+                    series(chartRows.map { it.topSet?.weightKg ?: 0.0 })
+                    series(chartRows.map { it.e1rm ?: 0.0 })
                 }
             }
         }
@@ -93,7 +68,7 @@ fun ExerciseDetailScreen(
 
     val shortDate = DateTimeFormatter.ofPattern("d MMM").withZone(ZoneId.systemDefault())
     val mediumDate = DateTimeFormatter.ofPattern("d MMM yyyy").withZone(ZoneId.systemDefault())
-    val chartLabels = history.map { shortDate.format(it.session.startedAt) }
+    val chartLabels = chartRows.map { shortDate.format(it.session.startedAt) }
     val xAxisFormatter = CartesianValueFormatter { value, _, _ ->
         chartLabels.getOrNull(value.roundToInt()) ?: ""
     }
@@ -101,41 +76,27 @@ fun ExerciseDetailScreen(
     val bestWeight = history.mapNotNull { it.topSet?.weightKg }.maxOrNull()
     val bestE1rm = history.mapNotNull { it.e1rm }.maxOrNull()
     val setCount = history.sumOf { it.sets.size }
-    val lastAt = history.lastOrNull()?.session?.startedAt
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { nav.popBackStack() }) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        SubScreenHeader(title = exercise?.name ?: "Exercise", onBack = { nav.popBackStack() })
+
+        Text(
+            buildList {
+                add(exercise?.groupName ?: "No muscle group")
+                add(exercise?.equipment?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "No equipment")
+            }.joinToString(" · "),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp)
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            if (loading) {
+                Text("Loading history…", style = MaterialTheme.typography.bodyMedium)
+                return@Column
             }
-            Column {
-                Text(
-                    exercise?.name ?: "Exercise",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    buildList {
-                        add(exercise?.muscleGroup?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "No muscle group")
-                        add(exercise?.equipment?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "No equipment")
-                    }.joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        if (loading) {
-            Text("Loading history…", style = MaterialTheme.typography.bodyMedium)
-            return@Column
-        }
 
         // Stat cards
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -154,7 +115,7 @@ fun ExerciseDetailScreen(
         Text("TOP SET & ESTIMATED 1RM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(8.dp))
 
-        if (history.size < 2) {
+        if (chartRows.size < 2) {
             Card(Modifier.fillMaxWidth()) {
                 Text(
                     "Perform this exercise in 2 or more workouts to see a trend.",
@@ -274,6 +235,7 @@ fun ExerciseDetailScreen(
         }
 
         Spacer(Modifier.height(16.dp))
+        }
     }
 }
 

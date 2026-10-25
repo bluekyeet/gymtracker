@@ -1,5 +1,7 @@
 # PowerTrack
 
+![PowerTrack Fitness Banner](docs/powertrack-banner.png)
+
 A personal gym tracker for one person: an Android phone app, a Wear OS watch app, a website, and a Kotlin backend that keeps them in sync. Offline first — every device writes to its own database and syncs when a connection returns. Sideloaded only, no Play Store, no Apple platforms.
 
 - **`DESIGN.md`** — what the product is and how it behaves. Source of truth for behavior.

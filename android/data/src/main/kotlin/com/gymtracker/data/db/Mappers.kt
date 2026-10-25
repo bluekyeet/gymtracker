@@ -3,8 +3,8 @@ package com.gymtracker.data.db
 import com.gymtracker.shared.domain.*
 import java.util.UUID
 
-fun ExerciseEntity.toDomain() = Exercise(id, userId, name, muscleGroup, equipment, isCustom, revision, createdAt, updatedAt, deletedAt)
-fun Exercise.toEntity() = ExerciseEntity(id, userId, name, muscleGroup, equipment, isCustom, revision, createdAt, updatedAt, deletedAt)
+fun ExerciseEntity.toDomain() = Exercise(id, userId, name, muscleGroup, customGroup, equipment, isCustom, revision, createdAt, updatedAt, deletedAt)
+fun Exercise.toEntity() = ExerciseEntity(id, userId, name, muscleGroup, customGroup, equipment, isCustom, revision, createdAt, updatedAt, deletedAt)
 
 fun SplitEntity.toDomain() = Split(id, userId, name, isActive, rotationPosition, revision, createdAt, updatedAt, deletedAt)
 fun Split.toEntity() = SplitEntity(id, userId, name, isActive, rotationPosition, revision, createdAt, updatedAt, deletedAt)

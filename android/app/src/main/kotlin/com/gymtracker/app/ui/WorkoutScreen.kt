@@ -15,16 +15,32 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.gymtracker.data.repository.WorkoutRepository
+import com.gymtracker.shared.domain.ExerciseHistoryRow
 import com.gymtracker.shared.domain.SetEntry
 import com.gymtracker.shared.domain.SetType
 import com.gymtracker.shared.domain.Validation
 import com.gymtracker.shared.domain.WorkoutExercise
 import com.gymtracker.shared.domain.WorkoutSession
+import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
+import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
+import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.core.cartesian.data.AxisValueOverrider
+import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
+import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
+import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import kotlin.math.roundToInt
 
+/**
+ * One exercise at a time. The bottom bar moves between them and finishes the workout; above it
+ * sits what was done the last time this exercise was performed, plus its recent trend.
+ */
 @Composable
 fun WorkoutScreen(
     nav: NavController,
@@ -36,70 +52,268 @@ fun WorkoutScreen(
 
     var session by remember { mutableStateOf<WorkoutSession?>(null) }
     var finishing by remember { mutableStateOf(false) }
+    var index by remember { mutableStateOf(0) }
+
+    var showUnloggedDialog by remember { mutableStateOf(false) }
+    var unloggedCount by remember { mutableStateOf(0) }
+
+    var lastSession by remember { mutableStateOf<Pair<WorkoutSession, List<SetEntry>>?>(null) }
+    var history by remember { mutableStateOf<List<ExerciseHistoryRow>>(emptyList()) }
 
     LaunchedEffect(sessionId) { session = workoutRepo.getSession(sessionId) }
 
-    val timeFormat = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+    val current = exercises.getOrNull(index.coerceIn(0, (exercises.size - 1).coerceAtLeast(0)))
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        Text(session?.dayName ?: "Workout", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(4.dp))
+    LaunchedEffect(current?.id, session?.startedAt) {
+        lastSession = null
+        history = emptyList()
+        val exerciseId = current?.exerciseId ?: return@LaunchedEffect
+        val startedAt = session?.startedAt ?: return@LaunchedEffect
+        lastSession = workoutRepo.lastSessionSets(exerciseId, startedAt)
+        history = workoutRepo.historyForExercise(exerciseId, excludeSessionId = sessionId)
+    }
+
+    fun doFinish() {
+        if (finishing) return
+        finishing = true
+        scope.launch {
+            val currentSession = workoutRepo.getSession(sessionId)
+            if (currentSession != null && currentSession.endedAt == null) {
+                workoutRepo.saveSession(currentSession.copy(endedAt = java.time.Instant.now()))
+            }
+            nav.popBackStack()
+        }
+    }
+
+    fun requestFinish() {
+        scope.launch {
+            var count = 0
+            for (ex in exercises) {
+                val sets = workoutRepo.observeSets(ex.id).first()
+                if (sets.none { it.weightKg > 0.0 }) {
+                    count++
+                }
+            }
+            if (count > 0) {
+                unloggedCount = count
+                showUnloggedDialog = true
+            } else {
+                doFinish()
+            }
+        }
+    }
+
+    val timeFormat = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+    val shortDate = DateTimeFormatter.ofPattern("d MMM").withZone(ZoneId.systemDefault())
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        SubScreenHeader(
+            title = session?.dayName ?: "Workout",
+            onBack = { nav.popBackStack() },
+            actions = {
+                TextButton(
+                    onClick = { requestFinish() },
+                    enabled = session != null && !finishing
+                ) {
+                    Text("Finish", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+
         Text(
             "Started ${session?.startedAt?.let { timeFormat.format(it) } ?: ""} · in progress",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.tertiary
         )
-        Spacer(Modifier.height(16.dp))
 
-        if (exercises.isEmpty()) {
-            Text(
-                "This workout has no exercises. Add them to the split day first.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        Spacer(Modifier.height(8.dp))
 
-        exercises.forEach { we ->
-            WorkoutExerciseCard(
-                workoutExercise = we,
-                workoutRepo = workoutRepo,
-                scope = scope
-            )
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        Button(
-            onClick = {
-                if (!finishing) {
-                    finishing = true
-                    scope.launch {
-                        val current = workoutRepo.getSession(sessionId)
-                        if (current != null && current.endedAt == null) {
-                            workoutRepo.saveSession(current.copy(endedAt = java.time.Instant.now()))
-                        }
-                        nav.popBackStack()
-                    }
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            enabled = session != null
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
         ) {
-            Text(if (finishing) "Finishing…" else "Finish workout", style = MaterialTheme.typography.titleMedium)
+            if (exercises.isEmpty()) {
+                Text(
+                    "This workout has no exercises. Add them to the split day first.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    "EXERCISE ${index + 1} OF ${exercises.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    current?.exerciseName ?: "",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(12.dp))
+
+                current?.let { WorkoutExerciseCard(it, workoutRepo, scope) }
+
+                Spacer(Modifier.height(16.dp))
+
+                LastSessionCard(lastSession, history, shortDate)
+
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+
+        HorizontalDivider()
+        Spacer(Modifier.height(8.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { index = (index - 1).coerceAtLeast(0) },
+                enabled = index > 0,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+            ) { Text("Previous") }
+            Button(
+                onClick = { index = (index + 1).coerceAtMost(exercises.lastIndex) },
+                enabled = index < exercises.lastIndex,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+            ) { Text("Next") }
         }
 
         Spacer(Modifier.height(8.dp))
         OutlinedButton(
             onClick = { nav.popBackStack() },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Continue later") }
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+        ) { Text("Finish later") }
+
+        if (showUnloggedDialog) {
+            AlertDialog(
+                onDismissRequest = { showUnloggedDialog = false },
+                title = { Text("Finish workout?") },
+                text = { Text("You have $unloggedCount exercise(s) with no sets logged. Finish anyway?") },
+                confirmButton = {
+                    Button(onClick = {
+                        showUnloggedDialog = false
+                        doFinish()
+                    }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                        Text("Finish anyway")
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showUnloggedDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+    }
+}
+
+/** What was done the last time this exercise was performed, plus how the top set has trended. */
+@Composable
+private fun LastSessionCard(
+    lastSession: Pair<WorkoutSession, List<SetEntry>>?,
+    history: List<ExerciseHistoryRow>,
+    shortDate: DateTimeFormatter
+) {
+    Text("LAST TIME", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(8.dp))
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp)) {
+            if (lastSession == null) {
+                Text(
+                    "First time doing this exercise — nothing to compare against yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                val (session, sets) = lastSession
+                Text(
+                    "${shortDate.format(session.startedAt)} · ${sets.size} sets",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(8.dp))
+                sets.forEach { s ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "${s.setNumber}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.width(24.dp)
+                        )
+                        Text(
+                            "${formatKg(s.weightKg).removeSuffix(" kg")} × ${s.reps}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            val points = history
+                .filter { (it.topSet?.weightKg ?: 0.0) > 0.0 }
+                .takeLast(8)
+            if (points.size < 2) {
+                Text(
+                    "Log this exercise in 2 or more workouts to see the trend.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                val modelProducer = remember(points) { CartesianChartModelProducer() }
+                LaunchedEffect(points) {
+                    modelProducer.runTransaction {
+                        lineSeries { series(points.map { it.topSet?.weightKg ?: 0.0 }) }
+                    }
+                }
+                val labels = points.map { shortDate.format(it.session.startedAt) }
+                val xAxisFormatter = CartesianValueFormatter { value, _, _ ->
+                    labels.getOrNull(value.roundToInt()) ?: ""
+                }
+                val yValues = points.mapNotNull { it.topSet?.weightKg }
+                val yMin = yValues.minOrNull() ?: 0.0
+                val yMax = yValues.maxOrNull() ?: 1.0
+                val padding = ((yMax - yMin) * 0.2).coerceAtLeast(1.0)
+
+                Text(
+                    "TOP SET PER WORKOUT",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                CartesianChartHost(
+                    chart = rememberCartesianChart(
+                        rememberLineCartesianLayer(
+                            axisValueOverrider = AxisValueOverrider.fixed(
+                                minX = null,
+                                maxX = null,
+                                minY = yMin - padding,
+                                maxY = yMax + padding
+                            )
+                        ),
+                        startAxis = rememberStartAxis(),
+                        bottomAxis = rememberBottomAxis(valueFormatter = xAxisFormatter)
+                    ),
+                    modelProducer = modelProducer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp)
+                )
+            }
+        }
     }
 }
 
@@ -111,15 +325,8 @@ private fun WorkoutExerciseCard(
 ) {
     val sets by workoutRepo.observeSets(workoutExercise.id).collectAsState(initial = emptyList())
 
-    Card(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-    ) {
+    Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
-            Text(workoutExercise.exerciseName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-
             if (sets.isEmpty()) {
                 Text(
                     "No sets yet.",
