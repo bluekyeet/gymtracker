@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: gymtracker_test
+      POSTGRES_USER: gymtracker_test
+      POSTGRES_PASSWORD: testpassword
+  api:
+    environment:
+      - JDBC_URL=jdbc:postgresql://postgres:5432/gymtracker_test
+      - POSTGRES_USER=gymtracker_test
+      - POSTGRES_PASSWORD=testpassword
+      - ENROLLMENT_KEY=test-enrollment-key-1234567890
+      - TOKEN_SIGNING_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

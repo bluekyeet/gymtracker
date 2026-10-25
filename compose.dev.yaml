@@ -1,0 +1,11 @@
+services:
+  api:
+    environment:
+      - LOG_LEVEL=debug
+    volumes:
+      - ./backend/src:/app/src
+  web:
+    environment:
+      - PUBLIC_API_BASE_URL=http://localhost:8081/v1
+    volumes:
+      - ./web/src:/app/src

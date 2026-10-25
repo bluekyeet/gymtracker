@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gymtracker}
+      POSTGRES_USER: ${POSTGRES_USER:-gymtracker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gymtracker} -d ${POSTGRES_DB:-gymtracker}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - PORT=${API_PORT:-8081}
+      - JDBC_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-gymtracker}
+      - POSTGRES_USER=${POSTGRES_USER:-gymtracker}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - ENROLLMENT_KEY=${ENROLLMENT_KEY:-k7m2-x9qd-4hrt-wc3f-p8ze-n6ay}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-adminpassword}
+      - TOKEN_SIGNING_KEY=${TOKEN_SIGNING_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      - ENROLLMENT_ENABLED=${ENROLLMENT_ENABLED:-true}
+      - TZ=${TZ:-UTC}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    ports:
+      - "${API_PORT:-8081}:${API_PORT:-8081}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:${API_PORT:-8081}/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  web:
+    build:
+      context: web
+      dockerfile: Dockerfile
+    environment:
+      - PORT=${WEBSITE_PORT:-8080}
+      - PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL:-http://localhost:8081/v1}
+    ports:
+      - "${WEBSITE_PORT:-8080}:${WEBSITE_PORT:-8080}"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:${WEBSITE_PORT:-8080}/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16-alpine
+    profiles:
+      - backup
+    volumes:
+      - pgdata:/var/lib/postgresql/data:ro
+      - backup_data:/backups
+      - ./infra/scripts:/scripts:ro
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-gymtracker}
+      - POSTGRES_USER=${POSTGRES_USER:-gymtracker}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+    command: /scripts/backup.sh
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+  backup_data:
+
+networks:
+  internal:
+    driver: bridge

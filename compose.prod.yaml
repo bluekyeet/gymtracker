@@ -1,0 +1,7 @@
+services:
+  api:
+    restart: always
+  web:
+    restart: always
+  postgres:
+    restart: always
