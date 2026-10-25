@@ -15,6 +15,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -38,6 +39,8 @@ fun App() {
     val splitRepo = remember { SplitRepository(db) }
     val workoutRepo = remember { WorkoutRepository(db) }
     val nav = rememberNavController()
+
+    LaunchedEffect(Unit) { exerciseRepo.seedBuiltinsIfNeeded() }
     val items = listOf(
         "today" to Icons.Filled.FitnessCenter,
         "splits" to Icons.Filled.ViewList,
@@ -71,16 +74,20 @@ fun App() {
             NavHost(navController = nav, startDestination = "today") {
                 composable("today") { TodayScreen(nav, splitRepo, workoutRepo, exerciseRepo) }
                 composable("splits") { SplitsScreen(nav, splitRepo, exerciseRepo) }
-                composable("exercises") { ExercisesScreen(nav, exerciseRepo) }
+                composable("exercises") { ExercisesScreen(exerciseRepo) }
                 composable("history") { HistoryScreen(nav, workoutRepo) }
                 composable("progress") { ProgressScreen(nav, workoutRepo, exerciseRepo) }
                 composable("split/{splitId}") { back ->
                     val id = back.arguments?.getString("splitId") ?: return@composable
                     SplitDetailScreen(nav, splitRepo, java.util.UUID.fromString(id))
                 }
+                composable("day/{dayId}") { back ->
+                    val id = back.arguments?.getString("dayId") ?: return@composable
+                    DayDetailScreen(nav, splitRepo, exerciseRepo, java.util.UUID.fromString(id))
+                }
                 composable("workout/{sessionId}") { back ->
                     val id = back.arguments?.getString("sessionId") ?: return@composable
-                    WorkoutScreen(nav, java.util.UUID.fromString(id), workoutRepo, exerciseRepo)
+                    WorkoutScreen(nav, java.util.UUID.fromString(id), workoutRepo)
                 }
             }
         }

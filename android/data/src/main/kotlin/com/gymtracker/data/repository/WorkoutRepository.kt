@@ -16,6 +16,8 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     suspend fun getSession(id: UUID): WorkoutSession? = db.workoutSessionDao().getById(id)?.toDomain()
 
+    suspend fun getInProgress(): WorkoutSession? = db.workoutSessionDao().getInProgress()?.toDomain()
+
     suspend fun saveSession(s: WorkoutSession) = db.workoutSessionDao().upsert(s.toEntity())
 
     fun observeExercises(sessionId: UUID): Flow<List<WorkoutExercise>> =
