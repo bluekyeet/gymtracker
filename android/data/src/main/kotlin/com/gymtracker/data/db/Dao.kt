@@ -14,7 +14,7 @@ interface ExerciseDao {
     @Query("SELECT * FROM exercises WHERE id = :id")
     suspend fun getById(id: UUID): ExerciseEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: ExerciseEntity)
 
     @Update
@@ -35,7 +35,7 @@ interface SplitDao {
     @Query("SELECT * FROM splits WHERE id = :id")
     suspend fun getById(id: UUID): SplitEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: SplitEntity)
 
     @Update
@@ -56,7 +56,7 @@ interface SplitDayDao {
     @Query("SELECT * FROM split_days WHERE id = :id")
     suspend fun getById(id: UUID): SplitDayEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: SplitDayEntity)
 
     @Update
@@ -74,7 +74,7 @@ interface SplitDayExerciseDao {
     @Query("SELECT * FROM split_day_exercises WHERE id = :id")
     suspend fun getById(id: UUID): SplitDayExerciseEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: SplitDayExerciseEntity)
 
     @Update
@@ -95,7 +95,7 @@ interface WorkoutSessionDao {
     @Query("SELECT * FROM workout_sessions WHERE endedAt IS NULL AND deletedAt IS NULL ORDER BY startedAt DESC LIMIT 1")
     suspend fun getInProgress(): WorkoutSessionEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: WorkoutSessionEntity)
 
     @Update
@@ -113,7 +113,7 @@ interface WorkoutExerciseDao {
     @Query("SELECT * FROM workout_exercises WHERE id = :id")
     suspend fun getById(id: UUID): WorkoutExerciseEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: WorkoutExerciseEntity)
 
     @Update
@@ -131,7 +131,7 @@ interface SetDao {
     @Query("SELECT * FROM sets WHERE id = :id")
     suspend fun getById(id: UUID): SetEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: SetEntity)
 
     @Update
@@ -149,7 +149,7 @@ interface BodyWeightDao {
     @Query("SELECT * FROM body_weights WHERE id = :id")
     suspend fun getById(id: UUID): BodyWeightEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: BodyWeightEntity)
 
     @Update
