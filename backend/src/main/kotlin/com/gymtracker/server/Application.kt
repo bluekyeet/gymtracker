@@ -3,6 +3,7 @@ package com.gymtracker.server
 import com.auth0.jwt.algorithms.Algorithm
 import com.gymtracker.server.auth.AuthService
 import com.gymtracker.server.sync.SyncService
+import com.gymtracker.server.common.installRateLimit
 import com.gymtracker.server.sync.syncRoutes
 import com.gymtracker.server.auth.authRoutes
 import com.gymtracker.server.database.DatabaseFactory
@@ -55,9 +56,7 @@ fun Application.module() {
             }
         }
     }
-    routing {
-        get("/health") { call.respondText("ok") }
-    }
+    installRateLimit()
     val syncService = SyncService()
     authRoutes(authService)
     syncRoutes(syncService)
