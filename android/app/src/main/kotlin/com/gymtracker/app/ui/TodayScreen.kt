@@ -37,7 +37,7 @@ fun TodayScreen(
             Spacer(Modifier.width(8.dp))
             Button(onClick = { nav.navigate("exercises") }) { Text("Exercises") }
             Spacer(Modifier.width(8.dp))
-            Button(onClick = { nav.navigate("history") }) { Text("History") }
+            Button(onClick = { nav.navigate("progress") }) { Text("Progress") }
         }
         Spacer(Modifier.height(16.dp))
         Text("Active split: ${activeSplit?.name ?: "None"}")

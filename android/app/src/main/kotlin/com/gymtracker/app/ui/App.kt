@@ -24,6 +24,7 @@ fun App() {
         composable("splits") { SplitsScreen(nav, splitRepo, exerciseRepo) }
         composable("exercises") { ExercisesScreen(nav, exerciseRepo) }
         composable("history") { HistoryScreen(nav, workoutRepo) }
+        composable("progress") { ProgressScreen(nav, workoutRepo, exerciseRepo) }
         composable("workout/{sessionId}") { back ->
             val id = back.arguments?.getString("sessionId") ?: return@composable
             WorkoutScreen(nav, java.util.UUID.fromString(id), workoutRepo, exerciseRepo)
