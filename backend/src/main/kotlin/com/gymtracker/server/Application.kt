@@ -2,6 +2,8 @@ package com.gymtracker.server
 
 import com.auth0.jwt.algorithms.Algorithm
 import com.gymtracker.server.auth.AuthService
+import com.gymtracker.server.sync.SyncService
+import com.gymtracker.server.sync.syncRoutes
 import com.gymtracker.server.auth.authRoutes
 import com.gymtracker.server.database.DatabaseFactory
 import io.ktor.server.application.*
@@ -56,5 +58,7 @@ fun Application.module() {
     routing {
         get("/health") { call.respondText("ok") }
     }
+    val syncService = SyncService()
     authRoutes(authService)
+    syncRoutes(syncService)
 }

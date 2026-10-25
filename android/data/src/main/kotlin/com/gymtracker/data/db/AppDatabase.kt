@@ -13,7 +13,8 @@ import androidx.room.TypeConverters
         WorkoutSessionEntity::class,
         WorkoutExerciseEntity::class,
         SetEntity::class,
-        BodyWeightEntity::class
+        BodyWeightEntity::class,
+        OutboxEntity::class
     ],
     version = 1,
     exportSchema = false
@@ -27,5 +28,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun workoutSessionDao(): WorkoutSessionDao
     abstract fun workoutExerciseDao(): WorkoutExerciseDao
     abstract fun setDao(): SetDao
-    abstract fun bodyWeightDao(): BodyWeightDao
+    abstract fun outboxDao(): OutboxDao
 }
