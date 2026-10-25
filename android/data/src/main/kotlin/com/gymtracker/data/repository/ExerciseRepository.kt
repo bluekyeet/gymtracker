@@ -1,5 +1,6 @@
 package com.gymtracker.data.repository
 
+import androidx.room.withTransaction
 import com.gymtracker.data.db.AppDatabase
 import com.gymtracker.data.db.toDomain
 import com.gymtracker.data.db.toEntity
@@ -8,6 +9,8 @@ import com.gymtracker.shared.domain.MuscleGroup
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.util.UUID
 
 class ExerciseRepository(private val db: AppDatabase) {
@@ -15,7 +18,22 @@ class ExerciseRepository(private val db: AppDatabase) {
 
     suspend fun getById(id: UUID): Exercise? = db.exerciseDao().getById(id)?.toDomain()
 
-    suspend fun save(exercise: Exercise) = db.exerciseDao().upsert(exercise.toEntity())
+    suspend fun save(exercise: Exercise) {
+        val entity = exercise.toEntity()
+        db.withTransaction {
+            db.exerciseDao().upsert(entity)
+            db.outboxDao().insert(
+                com.gymtracker.data.db.OutboxEntity(
+                    opId = UUID.randomUUID(),
+                    entity = "exercise",
+                    entityId = exercise.id,
+                    type = "upsert",
+                    baseRevision = exercise.revision,
+                    dataJson = Json.encodeToString(exercise)
+                )
+            )
+        }
+    }
 
     /** Seeds the built-in exercise library the first time the app runs. */
     suspend fun seedBuiltinsIfNeeded() {
@@ -25,7 +43,19 @@ class ExerciseRepository(private val db: AppDatabase) {
 
     suspend fun softDelete(id: UUID) {
         val now = java.time.Instant.now()
-        db.exerciseDao().softDelete(id, now, now)
+        db.withTransaction {
+            db.exerciseDao().softDelete(id, now, now)
+            db.outboxDao().insert(
+                com.gymtracker.data.db.OutboxEntity(
+                    opId = UUID.randomUUID(),
+                    entity = "exercise",
+                    entityId = id,
+                    type = "delete",
+                    baseRevision = 0,
+                    dataJson = null
+                )
+            )
+        }
     }
 
     private fun builtinExercises() = listOf(
