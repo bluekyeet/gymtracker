@@ -1,6 +1,9 @@
 package com.gymtracker.wear.ui
 
+import android.app.Activity
+import android.app.RemoteInput
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Build
@@ -8,6 +11,8 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -98,6 +103,51 @@ fun WearApp() {
     var pickMode by remember { mutableStateOf("add") } // "add" or "swap"
     var selectedSplitId by remember { mutableStateOf<UUID?>(null) }
     var selectedSplitDayId by remember { mutableStateOf<UUID?>(null) }
+    var selectedSplitForOptions by remember { mutableStateOf<Split?>(null) }
+    var selectedDayForOptions by remember { mutableStateOf<SplitDay?>(null) }
+    var selectedDayExerciseForEdit by remember { mutableStateOf<SplitDayExercise?>(null) }
+    var selectedDayExerciseName by remember { mutableStateOf<String>("") }
+
+    // Text input & Delete confirmation states
+    var nameInputTitle by remember { mutableStateOf("") }
+    var nameInputInitialValue by remember { mutableStateOf("") }
+    var nameInputPresets by remember { mutableStateOf<List<String>>(emptyList()) }
+    var nameInputConfirmAction by remember { mutableStateOf<((String) -> Unit)?>(null) }
+    var deleteConfirmTitle by remember { mutableStateOf("") }
+    var deleteConfirmMessage by remember { mutableStateOf("") }
+    var deleteConfirmAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    // Day input state (with Weekdays)
+    var dayInputTitle by remember { mutableStateOf("") }
+    var dayInputInitialName by remember { mutableStateOf("") }
+    var dayInputInitialWeekdays by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var dayInputPresets by remember { mutableStateOf<List<String>>(emptyList()) }
+    var dayInputConfirmAction by remember { mutableStateOf<((String, List<Int>) -> Unit)?>(null) }
+
+    // System Keyboard launcher
+    var onTextResultAction by remember { mutableStateOf<((String) -> Unit)?>(null) }
+    val remoteInputLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            val results = RemoteInput.getResultsFromIntent(result.data)
+            val text = results?.getCharSequence("input_text")?.toString()
+            if (!text.isNullOrBlank()) {
+                onTextResultAction?.invoke(text.trim())
+            }
+        }
+    }
+
+    fun launchSystemKeyboard(label: String, onResult: (String) -> Unit) {
+        onTextResultAction = onResult
+        try {
+            val intent = Intent("com.google.android.wearable.input.action.REMOTE_INPUT")
+            val remoteInput = RemoteInput.Builder("input_text")
+                .setLabel(label)
+                .build()
+            intent.putExtra("android.intent.extra.remote_inputs", arrayOf(remoteInput))
+            remoteInputLauncher.launch(intent)
+        } catch (_: Exception) {
+        }
+    }
 
     // Active session state
     var activeSession by remember { mutableStateOf<WorkoutSession?>(null) }
@@ -377,8 +427,77 @@ fun WearApp() {
                 onSelectSplit = { splitId ->
                     selectedSplitId = splitId
                     navigateTo("split_days")
+                },
+                onAddSplit = {
+                    nameInputTitle = "Add New Split"
+                    nameInputInitialValue = ""
+                    nameInputPresets = listOf("Push Pull Legs", "Upper Lower", "Full Body", "3-Day Split", "4-Day Split", "Arnold Split")
+                    nameInputConfirmAction = { newName ->
+                        scope.launch {
+                            val splits = splitRepo.observeAll().first()
+                            val isFirst = splits.isEmpty()
+                            val newSplit = Split(
+                                id = UUID.randomUUID(),
+                                userId = UUID.randomUUID(),
+                                name = newName,
+                                isActive = isFirst
+                            )
+                            splitRepo.save(newSplit)
+                            if (isFirst) splitRepo.setActive(newSplit.id)
+                            if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                        }
+                    }
+                    navigateTo("name_input")
+                },
+                onOptionsSplit = { split ->
+                    selectedSplitForOptions = split
+                    navigateTo("split_options")
                 }
             )
+
+            "split_options" -> {
+                val split = selectedSplitForOptions
+                if (split != null) {
+                    SplitOptionsScreen(
+                        split = split,
+                        onSetActive = {
+                            scope.launch {
+                                splitRepo.setActive(split.id)
+                                if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                            }
+                            navigateBack()
+                        },
+                        onViewDays = {
+                            selectedSplitId = split.id
+                            navigateTo("split_days")
+                        },
+                        onRenameSplit = {
+                            nameInputTitle = "Rename Split"
+                            nameInputInitialValue = split.name
+                            nameInputPresets = listOf("Push Pull Legs", "Upper Lower", "Full Body", "3-Day Split", "4-Day Split")
+                            nameInputConfirmAction = { updatedName ->
+                                scope.launch {
+                                    splitRepo.save(split.copy(name = updatedName))
+                                    if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                                }
+                            }
+                            navigateTo("name_input")
+                        },
+                        onDeleteSplit = {
+                            deleteConfirmTitle = "Delete Split"
+                            deleteConfirmMessage = "Delete '${split.name}' and all its days?"
+                            deleteConfirmAction = {
+                                scope.launch {
+                                    splitRepo.softDeleteSplit(split.id)
+                                    if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                                }
+                                navigateBack()
+                            }
+                            navigateTo("confirm_delete")
+                        }
+                    )
+                }
+            }
 
             "split_days" -> SplitDaysScreen(
                 splitId = selectedSplitId,
@@ -386,13 +505,207 @@ fun WearApp() {
                 onSelectDay = { dayId ->
                     selectedSplitDayId = dayId
                     navigateTo("day_exercises")
+                },
+                onAddDay = {
+                    dayInputTitle = "Add Training Day"
+                    dayInputInitialName = ""
+                    dayInputInitialWeekdays = emptyList()
+                    dayInputPresets = listOf("Push Day", "Pull Day", "Leg Day", "Upper Body", "Lower Body", "Chest & Triceps", "Back & Biceps", "Shoulders & Arms", "Cardio & Core")
+                    dayInputConfirmAction = { newDayName, weekdays ->
+                        val sId = selectedSplitId
+                        if (sId != null) {
+                            scope.launch {
+                                val currentDays = splitRepo.observeDays(sId).first()
+                                val newDay = SplitDay(
+                                    id = UUID.randomUUID(),
+                                    splitId = sId,
+                                    name = newDayName,
+                                    weekdays = weekdays,
+                                    sortKey = currentDays.size.toDouble()
+                                )
+                                splitRepo.saveDay(newDay)
+                                if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                            }
+                        }
+                    }
+                    navigateTo("day_input")
+                },
+                onOptionsDay = { day ->
+                    selectedDayForOptions = day
+                    navigateTo("day_options")
                 }
             )
+
+            "day_options" -> {
+                val day = selectedDayForOptions
+                if (day != null) {
+                    DayOptionsScreen(
+                        day = day,
+                        onViewExercises = {
+                            selectedSplitDayId = day.id
+                            navigateTo("day_exercises")
+                        },
+                        onRenameDay = {
+                            dayInputTitle = "Edit Training Day"
+                            dayInputInitialName = day.name
+                            dayInputInitialWeekdays = day.weekdays
+                            dayInputPresets = listOf("Push Day", "Pull Day", "Leg Day", "Upper Body", "Lower Body", "Arms & Shoulders")
+                            dayInputConfirmAction = { updatedName, updatedWeekdays ->
+                                scope.launch {
+                                    splitRepo.saveDay(day.copy(name = updatedName, weekdays = updatedWeekdays))
+                                    if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                                }
+                            }
+                            navigateTo("day_input")
+                        },
+                        onDeleteDay = {
+                            deleteConfirmTitle = "Delete Day"
+                            deleteConfirmMessage = "Delete '${day.name}' from this split?"
+                            deleteConfirmAction = {
+                                scope.launch {
+                                    splitRepo.softDeleteDay(day.id)
+                                    if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                                }
+                                navigateBack()
+                            }
+                            navigateTo("confirm_delete")
+                        }
+                    )
+                }
+            }
 
             "day_exercises" -> DayExercisesScreen(
                 dayId = selectedSplitDayId,
                 splitRepo = splitRepo,
-                exerciseRepo = exerciseRepo
+                exerciseRepo = exerciseRepo,
+                onAddExercise = {
+                    navigateTo("pick_day_exercise")
+                },
+                onEditExerciseTargets = { de, exName ->
+                    selectedDayExerciseForEdit = de
+                    selectedDayExerciseName = exName
+                    navigateTo("edit_exercise_targets")
+                },
+                onRemoveExercise = { de, exName ->
+                    deleteConfirmTitle = "Remove Exercise"
+                    deleteConfirmMessage = "Remove '$exName' from this day?"
+                    deleteConfirmAction = {
+                        scope.launch {
+                            splitRepo.softDeleteDayExercise(de.id)
+                            if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                        }
+                    }
+                    navigateTo("confirm_delete")
+                }
+            )
+
+            "edit_exercise_targets" -> {
+                val de = selectedDayExerciseForEdit
+                if (de != null) {
+                    EditExerciseTargetsScreen(
+                        exerciseName = selectedDayExerciseName,
+                        initialSets = de.targetSets ?: 3,
+                        initialReps = de.targetReps ?: 8,
+                        onSaveTargets = { newSets, newReps ->
+                            scope.launch {
+                                val updated = de.copy(targetSets = newSets, targetReps = newReps)
+                                splitRepo.saveDayExercise(updated)
+                                if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                            }
+                            navigateBack()
+                        },
+                        onCancel = { navigateBack() }
+                    )
+                }
+            }
+
+            "pick_day_exercise" -> AddExerciseToDayScreen(
+                exerciseRepo = exerciseRepo,
+                onLaunchKeyboard = ::launchSystemKeyboard,
+                onSelectExercise = { selectedEx ->
+                    val dayId = selectedSplitDayId
+                    if (dayId != null) {
+                        scope.launch {
+                            val existing = splitRepo.observeDayExercises(dayId).first()
+                            val newDe = SplitDayExercise(
+                                id = UUID.randomUUID(),
+                                splitDayId = dayId,
+                                exerciseId = selectedEx.id,
+                                sortKey = existing.size.toDouble(),
+                                targetSets = 3,
+                                targetReps = 8
+                            )
+                            splitRepo.saveDayExercise(newDe)
+                            if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                        }
+                    }
+                    navigateBack()
+                },
+                onAddCustomExercise = {
+                    nameInputTitle = "Custom Exercise Name"
+                    nameInputInitialValue = ""
+                    nameInputPresets = listOf("Incline Bench Press", "Romanian Deadlift", "Bulgarian Split Squat", "Lat Pulldown", "Cable Flyes", "Preacher Curl")
+                    nameInputConfirmAction = { customName ->
+                        scope.launch {
+                            val newEx = Exercise(
+                                id = UUID.randomUUID(),
+                                name = customName,
+                                isCustom = true
+                            )
+                            exerciseRepo.save(newEx)
+                            val dayId = selectedSplitDayId
+                            if (dayId != null) {
+                                val existing = splitRepo.observeDayExercises(dayId).first()
+                                val newDe = SplitDayExercise(
+                                    id = UUID.randomUUID(),
+                                    splitDayId = dayId,
+                                    exerciseId = newEx.id,
+                                    sortKey = existing.size.toDouble(),
+                                    targetSets = 3,
+                                    targetReps = 8
+                                )
+                                splitRepo.saveDayExercise(newDe)
+                            }
+                            if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                        }
+                    }
+                    navigateTo("name_input")
+                }
+            )
+
+            "name_input" -> NameInputScreen(
+                title = nameInputTitle,
+                initialValue = nameInputInitialValue,
+                presets = nameInputPresets,
+                onLaunchKeyboard = ::launchSystemKeyboard,
+                onConfirm = { name ->
+                    nameInputConfirmAction?.invoke(name)
+                    navigateBack()
+                },
+                onCancel = { navigateBack() }
+            )
+
+            "day_input" -> DayInputScreen(
+                title = dayInputTitle,
+                initialName = dayInputInitialName,
+                initialWeekdays = dayInputInitialWeekdays,
+                presets = dayInputPresets,
+                onLaunchKeyboard = ::launchSystemKeyboard,
+                onConfirm = { name, weekdays ->
+                    dayInputConfirmAction?.invoke(name, weekdays)
+                    navigateBack()
+                },
+                onCancel = { navigateBack() }
+            )
+
+            "confirm_delete" -> ConfirmDeleteScreen(
+                title = deleteConfirmTitle,
+                message = deleteConfirmMessage,
+                onConfirmDelete = {
+                    deleteConfirmAction?.invoke()
+                    navigateBack()
+                },
+                onCancel = { navigateBack() }
             )
 
             "settings" -> WatchSettingsScreen(
@@ -655,7 +968,9 @@ fun HomeScreen(
 @Composable
 fun EditSplitsScreen(
     splitRepo: SplitRepository,
-    onSelectSplit: (UUID) -> Unit
+    onSelectSplit: (UUID) -> Unit,
+    onAddSplit: () -> Unit,
+    onOptionsSplit: (Split) -> Unit
 ) {
     var splits by remember { mutableStateOf<List<Split>>(emptyList()) }
 
@@ -667,7 +982,7 @@ fun EditSplitsScreen(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
         autoCentering = null,
-        contentPadding = PaddingValues(top = 26.dp, bottom = 36.dp, start = 10.dp, end = 10.dp)
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
     ) {
         item {
             Text("Workout Splits", style = MaterialTheme.typography.title3, textAlign = TextAlign.Center)
@@ -675,21 +990,102 @@ fun EditSplitsScreen(
         item {
             Spacer(Modifier.height(4.dp))
         }
+        item {
+            Chip(
+                onClick = onAddSplit,
+                label = { Text("+ Add Split", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
+                colors = ChipDefaults.primaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
         if (splits.isEmpty()) {
             item {
+                Spacer(Modifier.height(8.dp))
                 Text("No splits configured", style = MaterialTheme.typography.body2, color = MaterialTheme.colors.onSurfaceVariant)
             }
         } else {
             items(splits.size) { idx ->
                 val split = splits[idx]
-                Chip(
-                    onClick = { onSelectSplit(split.id) },
-                    label = { Text(split.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    secondaryLabel = if (split.isActive) { { Text("Active Split", color = MaterialTheme.colors.primary) } } else null,
-                    colors = ChipDefaults.secondaryChipColors(),
-                    modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Chip(
+                        onClick = { onSelectSplit(split.id) },
+                        label = { Text(split.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        secondaryLabel = if (split.isActive) { { Text("Active Split", color = MaterialTheme.colors.primary, fontSize = 10.sp) } } else null,
+                        colors = ChipDefaults.secondaryChipColors(),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    CompactButton(
+                        onClick = { onOptionsSplit(split) },
+                        colors = ButtonDefaults.secondaryButtonColors()
+                    ) {
+                        Text("⋮", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
+        }
+        item {
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun SplitOptionsScreen(
+    split: Split,
+    onSetActive: () -> Unit,
+    onViewDays: () -> Unit,
+    onRenameSplit: () -> Unit,
+    onDeleteSplit: () -> Unit
+) {
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        autoCentering = null,
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
+    ) {
+        item {
+            Text(split.name, style = MaterialTheme.typography.title3, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+        }
+        item {
+            Chip(
+                onClick = onSetActive,
+                label = { Text(if (split.isActive) "Active Split ✓" else "Set Active Split") },
+                secondaryLabel = if (split.isActive) { { Text("Currently active", color = MaterialTheme.colors.primary, fontSize = 10.sp) } } else null,
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        item {
+            Chip(
+                onClick = onViewDays,
+                label = { Text("View Training Days") },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        item {
+            Chip(
+                onClick = onRenameSplit,
+                label = { Text("Rename Split") },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        item {
+            Chip(
+                onClick = onDeleteSplit,
+                label = { Text("Delete Split", color = MaterialTheme.colors.error) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
         }
         item {
             Spacer(Modifier.height(16.dp))
@@ -701,12 +1097,17 @@ fun EditSplitsScreen(
 fun SplitDaysScreen(
     splitId: UUID?,
     splitRepo: SplitRepository,
-    onSelectDay: (UUID) -> Unit
+    onSelectDay: (UUID) -> Unit,
+    onAddDay: () -> Unit,
+    onOptionsDay: (SplitDay) -> Unit
 ) {
     var days by remember { mutableStateOf<List<SplitDay>>(emptyList()) }
+    var splitName by remember { mutableStateOf("Training Days") }
 
     LaunchedEffect(splitId) {
         if (splitId != null) {
+            val split = splitRepo.getSplit(splitId)
+            if (split != null) splitName = split.name
             days = splitRepo.observeDays(splitId).first()
         }
     }
@@ -715,24 +1116,335 @@ fun SplitDaysScreen(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
         autoCentering = null,
-        contentPadding = PaddingValues(top = 26.dp, bottom = 36.dp, start = 10.dp, end = 10.dp)
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
     ) {
         item {
-            Text("Training Days", style = MaterialTheme.typography.title3, textAlign = TextAlign.Center)
+            Text(splitName, style = MaterialTheme.typography.title3, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         item {
             Spacer(Modifier.height(4.dp))
         }
+        item {
+            Chip(
+                onClick = onAddDay,
+                label = { Text("+ Add Day", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
+                colors = ChipDefaults.primaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
         if (days.isEmpty()) {
             item {
+                Spacer(Modifier.height(8.dp))
                 Text("No days in split", style = MaterialTheme.typography.body2, color = MaterialTheme.colors.onSurfaceVariant)
             }
         } else {
             items(days.size) { idx ->
                 val day = days[idx]
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Chip(
+                        onClick = { onSelectDay(day.id) },
+                        label = { Text(day.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        colors = ChipDefaults.secondaryChipColors(),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    CompactButton(
+                        onClick = { onOptionsDay(day) },
+                        colors = ButtonDefaults.secondaryButtonColors()
+                    ) {
+                        Text("⋮", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        item {
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun DayOptionsScreen(
+    day: SplitDay,
+    onViewExercises: () -> Unit,
+    onRenameDay: () -> Unit,
+    onDeleteDay: () -> Unit
+) {
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        autoCentering = null,
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
+    ) {
+        item {
+            Text(day.name, style = MaterialTheme.typography.title3, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+        }
+        item {
+            Chip(
+                onClick = onViewExercises,
+                label = { Text("View Exercises") },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        item {
+            Chip(
+                onClick = onRenameDay,
+                label = { Text("Rename Day") },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        item {
+            Chip(
+                onClick = onDeleteDay,
+                label = { Text("Delete Day", color = MaterialTheme.colors.error) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        item {
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun DayExercisesScreen(
+    dayId: UUID?,
+    splitRepo: SplitRepository,
+    exerciseRepo: ExerciseRepository,
+    onAddExercise: () -> Unit,
+    onEditExerciseTargets: (SplitDayExercise, String) -> Unit,
+    onRemoveExercise: (SplitDayExercise, String) -> Unit
+) {
+    var dayExercises by remember { mutableStateOf<List<SplitDayExercise>>(emptyList()) }
+    var allExercises by remember { mutableStateOf<List<Exercise>>(emptyList()) }
+    var dayName by remember { mutableStateOf("Day Exercises") }
+
+    LaunchedEffect(dayId) {
+        if (dayId != null) {
+            val day = splitRepo.getDay(dayId)
+            if (day != null) dayName = day.name
+            dayExercises = splitRepo.observeDayExercises(dayId).first()
+            allExercises = exerciseRepo.observeAll().first()
+        }
+    }
+
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        autoCentering = null,
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
+    ) {
+        item {
+            Text(dayName, style = MaterialTheme.typography.title3, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+        }
+        item {
+            Chip(
+                onClick = onAddExercise,
+                label = { Text("+ Add Exercise", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
+                colors = ChipDefaults.primaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        if (dayExercises.isEmpty()) {
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text("No exercises in day", style = MaterialTheme.typography.body2, color = MaterialTheme.colors.onSurfaceVariant)
+            }
+        } else {
+            items(dayExercises.size) { idx ->
+                val de = dayExercises[idx]
+                val ex = allExercises.firstOrNull { it.id == de.exerciseId }
+                val exName = ex?.name ?: "Exercise"
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Chip(
+                        onClick = { onEditExerciseTargets(de, exName) },
+                        label = { Text(exName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        secondaryLabel = {
+                            Text(
+                                "${de.targetSets ?: 3} sets × ${de.targetReps ?: 8} reps",
+                                color = MaterialTheme.colors.primary,
+                                fontSize = 10.sp
+                            )
+                        },
+                        colors = ChipDefaults.secondaryChipColors(),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    CompactButton(
+                        onClick = { onRemoveExercise(de, exName) },
+                        colors = ButtonDefaults.secondaryButtonColors()
+                    ) {
+                        Text("✕", color = MaterialTheme.colors.error, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        item {
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun EditExerciseTargetsScreen(
+    exerciseName: String,
+    initialSets: Int,
+    initialReps: Int,
+    onSaveTargets: (Int, Int) -> Unit,
+    onCancel: () -> Unit
+) {
+    var sets by remember { mutableIntStateOf(initialSets) }
+    var reps by remember { mutableIntStateOf(initialReps) }
+
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        autoCentering = null,
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
+    ) {
+        item {
+            Text(exerciseName, style = MaterialTheme.typography.title3, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        item {
+            Spacer(Modifier.height(2.dp))
+            Text("TARGET SETS", style = MaterialTheme.typography.caption2, color = MaterialTheme.colors.onSurfaceVariant)
+        }
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                CompactButton(onClick = { sets = (sets - 1).coerceAtLeast(1) }) {
+                    Text("−", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+                Text("$sets sets", style = MaterialTheme.typography.body1, fontWeight = FontWeight.Bold)
+                CompactButton(onClick = { sets = (sets + 1).coerceAtMost(20) }) {
+                    Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+            Text("TARGET REPS", style = MaterialTheme.typography.caption2, color = MaterialTheme.colors.onSurfaceVariant)
+        }
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                CompactButton(onClick = { reps = (reps - 1).coerceAtLeast(1) }) {
+                    Text("−", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+                Text("$reps reps", style = MaterialTheme.typography.body1, fontWeight = FontWeight.Bold)
+                CompactButton(onClick = { reps = (reps + 1).coerceAtMost(100) }) {
+                    Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        item {
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { onSaveTargets(sets, reps) },
+                modifier = Modifier.fillMaxWidth(0.85f).height(36.dp)
+            ) {
+                Text("Save Changes", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        item {
+            CompactChip(
+                onClick = onCancel,
+                label = { Text("Cancel", textAlign = TextAlign.Center) },
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun AddExerciseToDayScreen(
+    exerciseRepo: ExerciseRepository,
+    onLaunchKeyboard: (String, (String) -> Unit) -> Unit,
+    onSelectExercise: (Exercise) -> Unit,
+    onAddCustomExercise: () -> Unit
+) {
+    var exercises by remember { mutableStateOf<List<Exercise>>(emptyList()) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        exercises = exerciseRepo.observeAll().first()
+    }
+
+    val filtered = if (searchQuery.isBlank()) exercises else exercises.filter { it.name.contains(searchQuery, ignoreCase = true) }
+
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        autoCentering = null,
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
+    ) {
+        item {
+            Text("Add Exercise", style = MaterialTheme.typography.title3, textAlign = TextAlign.Center)
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+        }
+        item {
+            Chip(
+                onClick = {
+                    onLaunchKeyboard("Search Exercise") { query ->
+                        searchQuery = query
+                    }
+                },
+                label = { Text(if (searchQuery.isBlank()) "🔍 Search Exercises..." else "🔍 $searchQuery", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        if (searchQuery.isNotBlank()) {
+            item {
+                CompactChip(
+                    onClick = { searchQuery = "" },
+                    label = { Text("Clear Search", textAlign = TextAlign.Center) },
+                    modifier = Modifier.padding(vertical = 1.dp)
+                )
+            }
+        }
+        item {
+            Chip(
+                onClick = onAddCustomExercise,
+                label = { Text("+ Custom Exercise", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
+                colors = ChipDefaults.primaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        if (filtered.isEmpty()) {
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text("No exercises found", style = MaterialTheme.typography.body2, color = MaterialTheme.colors.onSurfaceVariant)
+            }
+        } else {
+            items(filtered.size) { idx ->
+                val ex = filtered[idx]
                 Chip(
-                    onClick = { onSelectDay(day.id) },
-                    label = { Text(day.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    onClick = { onSelectExercise(ex) },
+                    label = { Text(ex.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     colors = ChipDefaults.secondaryChipColors(),
                     modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
                 )
@@ -745,65 +1457,216 @@ fun SplitDaysScreen(
 }
 
 @Composable
-fun DayExercisesScreen(
-    dayId: UUID?,
-    splitRepo: SplitRepository,
-    exerciseRepo: ExerciseRepository
+fun NameInputScreen(
+    title: String,
+    initialValue: String,
+    presets: List<String>,
+    onLaunchKeyboard: (String, (String) -> Unit) -> Unit,
+    onConfirm: (String) -> Unit,
+    onCancel: () -> Unit
 ) {
-    var dayExercises by remember { mutableStateOf<List<SplitDayExercise>>(emptyList()) }
-    var allExercises by remember { mutableStateOf<List<Exercise>>(emptyList()) }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(dayId) {
-        if (dayId != null) {
-            dayExercises = splitRepo.observeDayExercises(dayId).first()
-            allExercises = exerciseRepo.observeAll().first()
-        }
-    }
+    var textValue by remember { mutableStateOf(initialValue) }
 
     ScalingLazyColumn(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
         autoCentering = null,
-        contentPadding = PaddingValues(top = 26.dp, bottom = 36.dp, start = 10.dp, end = 10.dp)
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
     ) {
         item {
-            Text("Day Exercises", style = MaterialTheme.typography.title3)
+            Text(title, style = MaterialTheme.typography.title3, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         item {
             Spacer(Modifier.height(4.dp))
         }
-        if (dayExercises.isEmpty()) {
-            item {
-                Text("No exercises in day", style = MaterialTheme.typography.body2)
-            }
-        } else {
-            items(dayExercises.size) { idx ->
-                val de = dayExercises[idx]
-                val ex = allExercises.firstOrNull { it.id == de.exerciseId }
-                Row(
-                    modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(ex?.name ?: "Exercise", style = MaterialTheme.typography.body2, modifier = Modifier.weight(1f))
-                    CompactButton(
-                        onClick = {
-                            scope.launch {
-                                splitRepo.softDeleteDayExercise(de.id)
-                                if (dayId != null) {
-                                    dayExercises = splitRepo.observeDayExercises(dayId).first()
-                                }
-                            }
-                        }
-                    ) {
-                        Text("X", color = MaterialTheme.colors.error)
+        item {
+            Chip(
+                onClick = {
+                    onLaunchKeyboard(title) { typed ->
+                        textValue = typed
                     }
+                },
+                label = { Text(if (textValue.isBlank()) "⌨ Type Name..." else textValue, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (textValue.isBlank()) MaterialTheme.colors.onSurfaceVariant else MaterialTheme.colors.primary) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        if (textValue.isNotBlank()) {
+            item {
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = { onConfirm(textValue.trim()) },
+                    modifier = Modifier.fillMaxWidth(0.85f).height(36.dp)
+                ) {
+                    Text("Confirm", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
         item {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(4.dp))
+            Text("OR SELECT PRESET", style = MaterialTheme.typography.caption2, color = MaterialTheme.colors.onSurfaceVariant)
+        }
+        items(presets.size) { idx ->
+            val preset = presets[idx]
+            Chip(
+                onClick = { onConfirm(preset) },
+                label = { Text(preset, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+            CompactChip(
+                onClick = onCancel,
+                label = { Text("Cancel", textAlign = TextAlign.Center) }
+            )
+        }
+    }
+}
+
+@Composable
+fun DayInputScreen(
+    title: String,
+    initialName: String,
+    initialWeekdays: List<Int>,
+    presets: List<String>,
+    onLaunchKeyboard: (String, (String) -> Unit) -> Unit,
+    onConfirm: (String, List<Int>) -> Unit,
+    onCancel: () -> Unit
+) {
+    var dayName by remember { mutableStateOf(initialName) }
+    var selectedWeekdays by remember { mutableStateOf(initialWeekdays.toSet()) }
+
+    val weekdayMap = listOf(
+        1 to "Mon",
+        2 to "Tue",
+        3 to "Wed",
+        4 to "Thu",
+        5 to "Fri",
+        6 to "Sat",
+        7 to "Sun"
+    )
+
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        autoCentering = null,
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
+    ) {
+        item {
+            Text(title, style = MaterialTheme.typography.title3, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+        }
+        item {
+            Chip(
+                onClick = {
+                    onLaunchKeyboard("Day Name") { typed ->
+                        dayName = typed
+                    }
+                },
+                label = { Text(if (dayName.isBlank()) "⌨ Type Day Name..." else dayName, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (dayName.isBlank()) MaterialTheme.colors.onSurfaceVariant else MaterialTheme.colors.primary) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+            Text("WEEKDAYS", style = MaterialTheme.typography.caption2, color = MaterialTheme.colors.onSurfaceVariant)
+        }
+        items(weekdayMap.size) { idx ->
+            val (dayNum, dayLabel) = weekdayMap[idx]
+            val isSelected = selectedWeekdays.contains(dayNum)
+            ToggleChip(
+                checked = isSelected,
+                onCheckedChange = { checked ->
+                    selectedWeekdays = if (checked) selectedWeekdays + dayNum else selectedWeekdays - dayNum
+                },
+                label = { Text(dayLabel) },
+                toggleControl = { Text(if (isSelected) "✓" else "  ", fontWeight = FontWeight.Bold, color = MaterialTheme.colors.primary) },
+                colors = ToggleChipDefaults.toggleChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 1.dp)
+            )
+        }
+        item {
+            Spacer(Modifier.height(6.dp))
+            Button(
+                enabled = dayName.isNotBlank(),
+                onClick = { onConfirm(dayName.trim(), selectedWeekdays.sorted()) },
+                modifier = Modifier.fillMaxWidth(0.85f).height(36.dp)
+            ) {
+                Text("Save Day", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+            Text("OR SELECT PRESET", style = MaterialTheme.typography.caption2, color = MaterialTheme.colors.onSurfaceVariant)
+        }
+        items(presets.size) { idx ->
+            val preset = presets[idx]
+            Chip(
+                onClick = {
+                    if (dayName.isBlank()) dayName = preset
+                    onConfirm(preset, selectedWeekdays.sorted())
+                },
+                label = { Text(preset, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+            CompactChip(
+                onClick = onCancel,
+                label = { Text("Cancel", textAlign = TextAlign.Center) }
+            )
+        }
+    }
+}
+
+@Composable
+fun ConfirmDeleteScreen(
+    title: String,
+    message: String,
+    onConfirmDelete: () -> Unit,
+    onCancel: () -> Unit
+) {
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        autoCentering = null,
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
+    ) {
+        item {
+            Text(title, style = MaterialTheme.typography.title3, textAlign = TextAlign.Center, color = MaterialTheme.colors.error)
+        }
+        item {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                message,
+                style = MaterialTheme.typography.body2,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(0.85f)
+            )
+        }
+        item {
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onConfirmDelete,
+                colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.error),
+                modifier = Modifier.fillMaxWidth(0.85f).height(36.dp)
+            ) {
+                Text("Delete", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colors.onError)
+            }
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+            CompactChip(
+                onClick = onCancel,
+                label = { Text("Cancel", textAlign = TextAlign.Center) }
+            )
         }
     }
 }
