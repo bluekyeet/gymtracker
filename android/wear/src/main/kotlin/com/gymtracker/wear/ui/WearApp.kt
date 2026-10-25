@@ -58,7 +58,7 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 @Composable
-fun WearApp() {
+fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val db = remember { DatabaseProvider.get(context) }
     val exerciseRepo = remember { ExerciseRepository(db) }
@@ -155,6 +155,11 @@ fun WearApp() {
     var sessionExercises by remember { mutableStateOf<List<WorkoutExercise>>(emptyList()) }
     var currentExerciseIndex by remember { mutableIntStateOf(0) }
     val currentExercise = sessionExercises.getOrNull(currentExerciseIndex)
+
+    // Keep screen on during active workout
+    LaunchedEffect(activeSession) {
+        onWorkoutActive(activeSession != null)
+    }
 
     // Current exercise sets & input steppers
     var currentSets by remember { mutableStateOf<List<SetEntry>>(emptyList()) }
@@ -362,23 +367,7 @@ fun WearApp() {
                             }
                         },
                         onFinishWorkout = {
-                            deleteConfirmTitle = "Finish Workout?"
-                            deleteConfirmMessage = "Mark workout as done and save it?"
-                            deleteConfirmAction = {
-                                scope.launch {
-                                    val session = activeSession
-                                    if (session != null) {
-                                        workoutRepo.saveSession(session.copy(endedAt = Instant.now()))
-                                        activeSession = null
-                                        sessionExercises = emptyList()
-                                    }
-                                    navigateBack()
-                                    if (serverClient.serverUrl.isNotBlank()) {
-                                        triggerSync()
-                                    }
-                                }
-                            }
-                            navigateTo("confirm_delete")
+                            navigateTo("finish_confirm")
                         }
                     )
                 }
@@ -697,6 +686,24 @@ fun WearApp() {
                 onConfirm = { name, weekdays ->
                     dayInputConfirmAction?.invoke(name, weekdays)
                     navigateBack()
+                },
+                onCancel = { navigateBack() }
+            )
+
+            "finish_confirm" -> FinishWorkoutScreen(
+                sessionName = activeSession?.dayName ?: "Workout",
+                onConfirm = {
+                    scope.launch {
+                        val session = activeSession
+                        if (session != null) {
+                            workoutRepo.saveSession(session.copy(endedAt = Instant.now()))
+                            activeSession = null
+                            sessionExercises = emptyList()
+                        }
+                        navigateBack()
+                        navigateBack() // back past finish_confirm to home
+                        if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                    }
                 },
                 onCancel = { navigateBack() }
             )
@@ -1663,6 +1670,60 @@ fun ConfirmDeleteScreen(
 }
 
 @Composable
+fun FinishWorkoutScreen(
+    sessionName: String,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
+) {
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        autoCentering = null,
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
+    ) {
+        item {
+            Text("Finish Workout?", style = MaterialTheme.typography.title3, textAlign = TextAlign.Center, color = MaterialTheme.colors.primary)
+        }
+        item {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                sessionName,
+                style = MaterialTheme.typography.body1,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Save and end this session?",
+                style = MaterialTheme.typography.body2,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colors.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(0.85f)
+            )
+        }
+        item {
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(backgroundColor = MaterialTheme.colors.primary),
+                modifier = Modifier.fillMaxWidth(0.85f).height(36.dp)
+            ) {
+                Text("✓ Finish", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+            CompactChip(
+                onClick = onCancel,
+                label = { Text("Keep Going", textAlign = TextAlign.Center) }
+            )
+        }
+    }
+}
+
+@Composable
 fun WatchSettingsScreen(
     serverClient: ServerClient,
     httpClient: HttpClient,
@@ -2020,13 +2081,13 @@ fun WorkoutLoggingScreen(
                     onClick = onPrevExercise,
                     enabled = exerciseIndex > 0
                 ) {
-                    Text("< Prev")
+                    Text("‹", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
                 CompactButton(
                     onClick = onNextExercise,
                     enabled = exerciseIndex < totalExercises - 1
                 ) {
-                    Text("Next >")
+                    Text("›", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
