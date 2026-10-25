@@ -50,7 +50,7 @@ private enum class ChartPeriod(val label: String, val days: Long?) {
     ALL("All", null)
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ProgressScreen(nav: NavController, workoutRepo: WorkoutRepository, exerciseRepo: ExerciseRepository) {
     val exercises by exerciseRepo.observeAll().collectAsState(initial = emptyList())
@@ -134,13 +134,69 @@ fun ProgressScreen(nav: NavController, workoutRepo: WorkoutRepository, exerciseR
             return@Column
         }
 
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            exercises.forEach { ex ->
-                FilterChip(
-                    selected = selected == ex.id,
-                    onClick = { selected = ex.id },
-                    label = { Text(ex.name) }
-                )
+        var menuOpen by remember { mutableStateOf(false) }
+        var exerciseQuery by remember { mutableStateOf("") }
+        val matched = exercises.filter { it.name.contains(exerciseQuery.trim(), ignoreCase = true) }
+
+        ExposedDropdownMenuBox(
+            expanded = menuOpen,
+            onExpandedChange = { menuOpen = it }
+        ) {
+            OutlinedTextField(
+                value = exercises.firstOrNull { it.id == selected }?.name ?: "",
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Exercise") },
+                placeholder = { Text("Select an exercise") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuOpen) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+            )
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                modifier = Modifier.exposedDropdownSize()
+            ) {
+                if (exercises.size >= 8) {
+                    DropdownMenuItem(
+                        text = {
+                            OutlinedTextField(
+                                value = exerciseQuery,
+                                onValueChange = { exerciseQuery = it },
+                                label = { Text("Search") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        },
+                        onClick = {}
+                    )
+                }
+                if (matched.isEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text("No match", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                        onClick = { menuOpen = false }
+                    )
+                }
+                matched.forEach { ex ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(ex.name, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    ex.muscleGroup?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "No muscle group",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        },
+                        onClick = {
+                            selected = ex.id
+                            exerciseQuery = ""
+                            menuOpen = false
+                        }
+                    )
+                }
             }
         }
 
@@ -172,11 +228,17 @@ fun ProgressScreen(nav: NavController, workoutRepo: WorkoutRepository, exerciseR
                 val s = stats
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(
-                            exercises.firstOrNull { it.id == selected }?.name ?: "",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                exercises.firstOrNull { it.id == selected }?.name ?: "",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { selected?.let { nav.navigate("exercise/$it") } }) {
+                                Text("History")
+                            }
+                        }
                         Spacer(Modifier.height(12.dp))
                         StatRow("Best weight", s?.bestWeight?.let { formatKg(it) } ?: "—")
                         StatRow("Best estimated 1RM", s?.bestE1rm?.let { formatKg(it) } ?: "—")
