@@ -37,7 +37,7 @@ class SyncManager(private val context: Context, private val db: AppDatabase) {
         com.gymtracker.data.repository.SplitRepository(db).backfillExistingSplitsToOutbox()
         val outbox = db.outboxDao().getAll()
         if (outbox.isEmpty()) return@withContext
-        val entityOrder = mapOf("exercise" to 1, "split" to 2, "split_day" to 3, "split_day_exercise" to 4)
+        val entityOrder = mapOf("exercise" to 1, "split" to 2, "split_day" to 3, "split_day_exercise" to 4, "workout_session" to 5, "workout_exercise" to 6, "set" to 7)
         val sortedOutbox = outbox.sortedBy { entityOrder[it.entity] ?: 5 }
         val ops = sortedOutbox.map { o ->
             SyncOperation(
@@ -190,6 +190,30 @@ class SyncManager(private val context: Context, private val db: AppDatabase) {
                 } else {
                     val m = c.data?.let { json.decodeFromJsonElement(serializer<SplitDayExercise>(), it) }
                     if (m != null) db.splitDayExerciseDao().upsert(m.toEntity())
+                }
+            }
+            "workout_session" -> {
+                if (c.deleted) {
+                    db.workoutSessionDao().softDelete(id, now, now)
+                } else {
+                    val m = c.data?.let { json.decodeFromJsonElement(serializer<WorkoutSession>(), it) }
+                    if (m != null) db.workoutSessionDao().upsert(m.toEntity())
+                }
+            }
+            "workout_exercise" -> {
+                if (c.deleted) {
+                    db.workoutExerciseDao().softDelete(id, now, now)
+                } else {
+                    val m = c.data?.let { json.decodeFromJsonElement(serializer<WorkoutExercise>(), it) }
+                    if (m != null) db.workoutExerciseDao().upsert(m.toEntity())
+                }
+            }
+            "set" -> {
+                if (c.deleted) {
+                    db.setDao().softDelete(id, now, now)
+                } else {
+                    val m = c.data?.let { json.decodeFromJsonElement(serializer<SetEntry>(), it) }
+                    if (m != null) db.setDao().upsert(m.toEntity())
                 }
             }
             else -> {}

@@ -219,13 +219,36 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
     // Watch for set changes when current exercise changes
     LaunchedEffect(currentExercise?.id) {
         val exId = currentExercise?.id
+        val exerciseLibId = currentExercise?.exerciseId
         if (exId != null) {
             val sets = workoutRepo.observeSets(exId).first()
             currentSets = sets
-            val last = sets.lastOrNull()
-            if (last != null) {
+            if (sets.isNotEmpty()) {
+                // Already logged sets this session — pre-fill from last logged set
+                val last = sets.last()
                 weightInput = last.weightKg
                 repsInput = last.reps
+            } else {
+                // No sets yet — use last session's weight, and target reps from split plan
+                val sessionStarted = activeSession?.startedAt ?: java.time.Instant.now()
+                val lastWeight = if (exerciseLibId != null) {
+                    workoutRepo.lastSessionSets(exerciseLibId, sessionStarted)
+                        ?.second?.filter { it.setType != com.gymtracker.shared.domain.SetType.WARMUP }
+                        ?.maxByOrNull { it.weightKg }?.weightKg
+                } else null
+
+                // Target reps from split plan — find matching SplitDayExercise
+                val targetReps = if (exerciseLibId != null) {
+                    val session = activeSession
+                    val dayId = session?.splitDayId
+                    if (dayId != null) {
+                        val dayExercises = splitRepo.observeDayExercises(dayId).first()
+                        dayExercises.firstOrNull { it.exerciseId == exerciseLibId }?.targetReps
+                    } else null
+                } else null
+
+                if (lastWeight != null) weightInput = lastWeight
+                if (targetReps != null) repsInput = targetReps
             }
         } else {
             currentSets = emptyList()

@@ -1,6 +1,8 @@
 package com.gymtracker.data.repository
 
+import androidx.room.withTransaction
 import com.gymtracker.data.db.AppDatabase
+import com.gymtracker.data.db.OutboxEntity
 import com.gymtracker.data.db.toDomain
 import com.gymtracker.data.db.toEntity
 import com.gymtracker.shared.domain.Calculations
@@ -12,10 +14,14 @@ import com.gymtracker.shared.domain.WorkoutSession
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.util.UUID
 
 class WorkoutRepository(private val db: AppDatabase) {
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+
     fun observeSessions(): Flow<List<WorkoutSession>> =
         db.workoutSessionDao().getAll().map { it.map { e -> e.toDomain() } }
 
@@ -23,26 +29,109 @@ class WorkoutRepository(private val db: AppDatabase) {
 
     suspend fun getInProgress(): WorkoutSession? = db.workoutSessionDao().getInProgress()?.toDomain()
 
-    suspend fun saveSession(s: WorkoutSession) = db.workoutSessionDao().upsert(s.toEntity())
+    suspend fun saveSession(s: WorkoutSession) {
+        db.withTransaction {
+            db.workoutSessionDao().upsert(s.toEntity())
+            db.outboxDao().insert(
+                OutboxEntity(
+                    opId = UUID.randomUUID(),
+                    entity = "workout_session",
+                    entityId = s.id,
+                    type = "upsert",
+                    baseRevision = s.revision,
+                    dataJson = json.encodeToString(s)
+                )
+            )
+        }
+    }
+
+    suspend fun softDeleteSession(id: UUID) {
+        val now = Instant.now()
+        db.withTransaction {
+            db.workoutSessionDao().softDelete(id, now, now)
+            db.outboxDao().insert(
+                OutboxEntity(
+                    opId = UUID.randomUUID(),
+                    entity = "workout_session",
+                    entityId = id,
+                    type = "delete",
+                    baseRevision = 0,
+                    dataJson = null
+                )
+            )
+        }
+    }
 
     fun observeExercises(sessionId: UUID): Flow<List<WorkoutExercise>> =
         db.workoutExerciseDao().getBySession(sessionId).map { it.map { e -> e.toDomain() } }
 
-    suspend fun saveExercise(e: WorkoutExercise) = db.workoutExerciseDao().upsert(e.toEntity())
+    suspend fun saveExercise(e: WorkoutExercise) {
+        db.withTransaction {
+            db.workoutExerciseDao().upsert(e.toEntity())
+            db.outboxDao().insert(
+                OutboxEntity(
+                    opId = UUID.randomUUID(),
+                    entity = "workout_exercise",
+                    entityId = e.id,
+                    type = "upsert",
+                    baseRevision = e.revision,
+                    dataJson = json.encodeToString(e)
+                )
+            )
+        }
+    }
 
     suspend fun softDeleteExercise(id: UUID) {
-        val now = java.time.Instant.now()
-        db.workoutExerciseDao().softDelete(id, now, now)
+        val now = Instant.now()
+        db.withTransaction {
+            db.workoutExerciseDao().softDelete(id, now, now)
+            db.outboxDao().insert(
+                OutboxEntity(
+                    opId = UUID.randomUUID(),
+                    entity = "workout_exercise",
+                    entityId = id,
+                    type = "delete",
+                    baseRevision = 0,
+                    dataJson = null
+                )
+            )
+        }
     }
 
     fun observeSets(workoutExerciseId: UUID): Flow<List<SetEntry>> =
         db.setDao().getByWorkoutExercise(workoutExerciseId).map { it.map { e -> e.toDomain() } }
 
-    suspend fun saveSet(s: SetEntry) = db.setDao().upsert(s.toEntity())
+    suspend fun saveSet(s: SetEntry) {
+        db.withTransaction {
+            db.setDao().upsert(s.toEntity())
+            db.outboxDao().insert(
+                OutboxEntity(
+                    opId = UUID.randomUUID(),
+                    entity = "set",
+                    entityId = s.id,
+                    type = "upsert",
+                    baseRevision = s.revision,
+                    dataJson = json.encodeToString(s)
+                )
+            )
+        }
+    }
 
     suspend fun softDeleteSet(id: UUID) {
-        val now = java.time.Instant.now()
-        db.setDao().softDelete(id, now, now)
+        val now = Instant.now()
+        db.withTransaction {
+            db.setDao().softDelete(id, now, now)
+            db.outboxDao().insert(
+                OutboxEntity(
+                    opId = UUID.randomUUID(),
+                    entity = "set",
+                    entityId = id,
+                    type = "delete",
+                    baseRevision = 0,
+                    dataJson = null
+                )
+            )
+        }
     }
 
     /** The sets logged for [exerciseId] in the most recent session started before [before]. */

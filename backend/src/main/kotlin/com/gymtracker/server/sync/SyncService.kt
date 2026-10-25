@@ -212,7 +212,92 @@ class SyncService {
                 }
                 Triple("applied", newRev, null)
             }
-            else -> Triple("rejected", null, "unsupported_entity")
+            "workout_session" -> {
+                val m = json.decodeFromJsonElement<WorkoutSession>(data)
+                val existing = WorkoutSessions.selectAll().where { WorkoutSessions.id eq UUID.fromString(op.entityId) }.singleOrNull()
+                if (existing != null && existing[WorkoutSessions.deletedAt] != null) return Triple("rejected", null, "deleted")
+                val newRev = (existing?.get(WorkoutSessions.revision) ?: 0) + 1
+                if (existing == null) {
+                    WorkoutSessions.insert {
+                        it[id] = UUID.fromString(op.entityId)
+                        it[WorkoutSessions.userId] = userId
+                        it[splitDayId] = m.splitDayId
+                        it[dayName] = m.dayName
+                        it[startedAt] = OffsetDateTime.ofInstant(m.startedAt, ZoneOffset.UTC)
+                        it[endedAt] = m.endedAt?.let { t -> OffsetDateTime.ofInstant(t, ZoneOffset.UTC) }
+                        it[notes] = m.notes
+                        it[revision] = newRev
+                        it[createdAt] = now
+                        it[updatedAt] = now
+                    }
+                } else {
+                    WorkoutSessions.update({ WorkoutSessions.id eq UUID.fromString(op.entityId) }) {
+                        it[dayName] = m.dayName
+                        it[endedAt] = m.endedAt?.let { t -> OffsetDateTime.ofInstant(t, ZoneOffset.UTC) }
+                        it[notes] = m.notes
+                        it[revision] = newRev
+                        it[updatedAt] = now
+                    }
+                }
+                Triple("applied", newRev, null)
+            }
+            "workout_exercise" -> {
+                val m = json.decodeFromJsonElement<WorkoutExercise>(data)
+                val existing = WorkoutExercises.selectAll().where { WorkoutExercises.id eq UUID.fromString(op.entityId) }.singleOrNull()
+                if (existing != null && existing[WorkoutExercises.deletedAt] != null) return Triple("rejected", null, "deleted")
+                val newRev = (existing?.get(WorkoutExercises.revision) ?: 0) + 1
+                if (existing == null) {
+                    WorkoutExercises.insert {
+                        it[id] = UUID.fromString(op.entityId)
+                        it[sessionId] = m.sessionId
+                        it[exerciseId] = m.exerciseId
+                        it[exerciseName] = m.exerciseName
+                        it[sortKey] = m.sortKey
+                        it[revision] = newRev
+                        it[createdAt] = now
+                        it[updatedAt] = now
+                    }
+                } else {
+                    WorkoutExercises.update({ WorkoutExercises.id eq UUID.fromString(op.entityId) }) {
+                        it[exerciseName] = m.exerciseName
+                        it[sortKey] = m.sortKey
+                        it[revision] = newRev
+                        it[updatedAt] = now
+                    }
+                }
+                Triple("applied", newRev, null)
+            }
+            "set" -> {
+                val m = json.decodeFromJsonElement<SetEntry>(data)
+                val existing = Sets.selectAll().where { Sets.id eq UUID.fromString(op.entityId) }.singleOrNull()
+                if (existing != null && existing[Sets.deletedAt] != null) return Triple("rejected", null, "deleted")
+                val newRev = (existing?.get(Sets.revision) ?: 0) + 1
+                if (existing == null) {
+                    Sets.insert {
+                        it[id] = UUID.fromString(op.entityId)
+                        it[workoutExerciseId] = m.workoutExerciseId
+                        it[setNumber] = m.setNumber
+                        it[weightKg] = m.weightKg.toBigDecimal()
+                        it[reps] = m.reps
+                        it[rpe] = m.rpe?.toBigDecimal()
+                        it[setType] = m.setType.name.lowercase()
+                        it[revision] = newRev
+                        it[createdAt] = now
+                        it[updatedAt] = now
+                    }
+                } else {
+                    Sets.update({ Sets.id eq UUID.fromString(op.entityId) }) {
+                        it[setNumber] = m.setNumber
+                        it[weightKg] = m.weightKg.toBigDecimal()
+                        it[reps] = m.reps
+                        it[rpe] = m.rpe?.toBigDecimal()
+                        it[setType] = m.setType.name.lowercase()
+                        it[revision] = newRev
+                        it[updatedAt] = now
+                    }
+                }
+                Triple("applied", newRev, null)
+            }
         }
     }
 
@@ -262,6 +347,42 @@ class SyncService {
                 if (existing[SplitDayExercises.deletedAt] != null) return Triple("applied", existing[SplitDayExercises.revision], null)
                 val newRev = existing[SplitDayExercises.revision] + 1
                 SplitDayExercises.update({ SplitDayExercises.id eq UUID.fromString(op.entityId) }) {
+                    it[deletedAt] = now
+                    it[revision] = newRev
+                    it[updatedAt] = now
+                }
+                Triple("applied", newRev, null)
+            }
+            "workout_session" -> {
+                val existing = WorkoutSessions.selectAll().where { WorkoutSessions.id eq UUID.fromString(op.entityId) }.singleOrNull()
+                if (existing == null) return Triple("applied", 1, null)
+                if (existing[WorkoutSessions.deletedAt] != null) return Triple("applied", existing[WorkoutSessions.revision], null)
+                val newRev = existing[WorkoutSessions.revision] + 1
+                WorkoutSessions.update({ WorkoutSessions.id eq UUID.fromString(op.entityId) }) {
+                    it[deletedAt] = now
+                    it[revision] = newRev
+                    it[updatedAt] = now
+                }
+                Triple("applied", newRev, null)
+            }
+            "workout_exercise" -> {
+                val existing = WorkoutExercises.selectAll().where { WorkoutExercises.id eq UUID.fromString(op.entityId) }.singleOrNull()
+                if (existing == null) return Triple("applied", 1, null)
+                if (existing[WorkoutExercises.deletedAt] != null) return Triple("applied", existing[WorkoutExercises.revision], null)
+                val newRev = existing[WorkoutExercises.revision] + 1
+                WorkoutExercises.update({ WorkoutExercises.id eq UUID.fromString(op.entityId) }) {
+                    it[deletedAt] = now
+                    it[revision] = newRev
+                    it[updatedAt] = now
+                }
+                Triple("applied", newRev, null)
+            }
+            "set" -> {
+                val existing = Sets.selectAll().where { Sets.id eq UUID.fromString(op.entityId) }.singleOrNull()
+                if (existing == null) return Triple("applied", 1, null)
+                if (existing[Sets.deletedAt] != null) return Triple("applied", existing[Sets.revision], null)
+                val newRev = existing[Sets.revision] + 1
+                Sets.update({ Sets.id eq UUID.fromString(op.entityId) }) {
                     it[deletedAt] = now
                     it[revision] = newRev
                     it[updatedAt] = now
@@ -373,7 +494,52 @@ class SyncService {
                     deletedAt = row[SplitDayExercises.deletedAt]?.toInstant()
                 ))
             }
-            else -> null
+            "workout_session" -> {
+                val row = WorkoutSessions.selectAll().where { WorkoutSessions.id eq id }.singleOrNull() ?: return null
+                json.encodeToJsonElement(WorkoutSession(
+                    id = row[WorkoutSessions.id],
+                    userId = row[WorkoutSessions.userId],
+                    splitDayId = row[WorkoutSessions.splitDayId],
+                    dayName = row[WorkoutSessions.dayName],
+                    startedAt = row[WorkoutSessions.startedAt].toInstant(),
+                    endedAt = row[WorkoutSessions.endedAt]?.toInstant(),
+                    notes = row[WorkoutSessions.notes],
+                    revision = row[WorkoutSessions.revision],
+                    createdAt = row[WorkoutSessions.createdAt].toInstant(),
+                    updatedAt = row[WorkoutSessions.updatedAt].toInstant(),
+                    deletedAt = row[WorkoutSessions.deletedAt]?.toInstant()
+                ))
+            }
+            "workout_exercise" -> {
+                val row = WorkoutExercises.selectAll().where { WorkoutExercises.id eq id }.singleOrNull() ?: return null
+                json.encodeToJsonElement(WorkoutExercise(
+                    id = row[WorkoutExercises.id],
+                    sessionId = row[WorkoutExercises.sessionId],
+                    exerciseId = row[WorkoutExercises.exerciseId],
+                    exerciseName = row[WorkoutExercises.exerciseName],
+                    sortKey = row[WorkoutExercises.sortKey],
+                    revision = row[WorkoutExercises.revision],
+                    createdAt = row[WorkoutExercises.createdAt].toInstant(),
+                    updatedAt = row[WorkoutExercises.updatedAt].toInstant(),
+                    deletedAt = row[WorkoutExercises.deletedAt]?.toInstant()
+                ))
+            }
+            "set" -> {
+                val row = Sets.selectAll().where { Sets.id eq id }.singleOrNull() ?: return null
+                json.encodeToJsonElement(SetEntry(
+                    id = row[Sets.id],
+                    workoutExerciseId = row[Sets.workoutExerciseId],
+                    setNumber = row[Sets.setNumber],
+                    weightKg = row[Sets.weightKg].toDouble(),
+                    reps = row[Sets.reps],
+                    rpe = row[Sets.rpe]?.toDouble(),
+                    setType = SetType.valueOf(row[Sets.setType].uppercase()),
+                    revision = row[Sets.revision],
+                    createdAt = row[Sets.createdAt].toInstant(),
+                    updatedAt = row[Sets.updatedAt].toInstant(),
+                    deletedAt = row[Sets.deletedAt]?.toInstant()
+                ))
+            }
         }
     }
 }
