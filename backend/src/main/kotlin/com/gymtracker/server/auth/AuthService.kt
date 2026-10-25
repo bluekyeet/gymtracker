@@ -25,6 +25,47 @@ class AuthService(private val jwtSecret: String) {
 
     fun hashPassword(password: String): String = argon2.hash(3, 65536, 1, password.toCharArray())
 
+    fun enrollDevice(deviceName: String, deviceKind: String): TokenPair {
+        return transaction {
+            val user = Users.selectAll().firstOrNull() ?: run {
+                val newUserId = UUID.fromString("00000000-0000-0000-0000-000000000001")
+                Users.insert {
+                    it[id] = newUserId
+                    it[email] = "owner@powertrack.local"
+                    it[passwordHash] = "enrolled_device_user_placeholder"
+                    it[lastSeq] = 0
+                    it[unitPreference] = "kg"
+                    it[timezone] = "UTC"
+                    it[createdAt] = OffsetDateTime.now(ZoneOffset.UTC)
+                    it[updatedAt] = OffsetDateTime.now(ZoneOffset.UTC)
+                }
+                Users.selectAll().where { Users.id eq newUserId }.single()
+            }
+            val userId = user[Users.id]
+            val deviceId = UUID.randomUUID()
+            Devices.insert {
+                it[id] = deviceId
+                it[this.userId] = userId
+                it[name] = deviceName
+                it[kind] = deviceKind
+                it[createdAt] = OffsetDateTime.now(ZoneOffset.UTC)
+                it[updatedAt] = OffsetDateTime.now(ZoneOffset.UTC)
+            }
+            val familyId = UUID.randomUUID()
+            val refresh = UUID.randomUUID().toString()
+            RefreshTokens.insert {
+                it[id] = UUID.randomUUID()
+                it[this.deviceId] = deviceId
+                it[tokenHash] = sha256(refresh)
+                it[this.familyId] = familyId
+                it[used] = false
+                it[expiresAt] = OffsetDateTime.now(ZoneOffset.UTC).plusDays(30)
+                it[createdAt] = OffsetDateTime.now(ZoneOffset.UTC)
+            }
+            TokenPair(createAccessToken(userId, deviceId), refresh, deviceId)
+        }
+    }
+
     fun login(email: String, password: String, deviceName: String, deviceKind: String): TokenPair? {
         return transaction {
             val user = Users.selectAll().where { Users.email eq email }.singleOrNull() ?: return@transaction null

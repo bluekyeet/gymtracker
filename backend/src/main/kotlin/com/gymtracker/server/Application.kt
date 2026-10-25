@@ -4,6 +4,7 @@ import com.gymtracker.server.auth.authRoutes
 import com.gymtracker.server.auth.AuthService
 import com.gymtracker.server.sync.syncRoutes
 import com.gymtracker.server.sync.SyncService
+import com.gymtracker.server.database.DatabaseFactory
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
@@ -49,11 +50,18 @@ fun main() {
 }
 
 fun Application.configureServer() {
+    DatabaseFactory.init(
+        System.getenv("JDBC_URL") ?: System.getenv("DATABASE_URL") ?: "jdbc:postgresql://localhost:5432/gymtracker",
+        System.getenv("POSTGRES_USER") ?: "gymtracker",
+        System.getenv("POSTGRES_PASSWORD") ?: "change-me"
+    )
+
     install(ContentNegotiation) {
         json()
     }
     install(StatusPages) {
         exception<Throwable> { call, cause ->
+            cause.printStackTrace()
             call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (cause.localizedMessage ?: "Unknown error")))
         }
     }
@@ -105,16 +113,13 @@ fun Application.configureServer() {
                 return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid enrollment key"))
             }
 
-            val deviceId = UUID.randomUUID()
-            val userId = UUID.randomUUID() // Default user context for enrolled device
-            val accessToken = authService.createAccessToken(userId, deviceId)
-            val refreshToken = UUID.randomUUID().toString()
+            val pair = authService.enrollDevice(request.deviceName, request.deviceKind)
 
             call.respond(
                 EnrollResponse(
-                    accessToken = accessToken,
-                    refreshToken = refreshToken,
-                    deviceId = deviceId.toString()
+                    accessToken = pair.accessToken,
+                    refreshToken = pair.refreshToken,
+                    deviceId = pair.deviceId.toString()
                 )
             )
         }

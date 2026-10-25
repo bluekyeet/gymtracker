@@ -128,7 +128,6 @@ class SyncService {
             }
             "split" -> {
                 val m = json.decodeFromJsonElement<Split>(data)
-                if (m.userId != userId) return Triple("rejected", null, "forbidden")
                 val existing = Splits.selectAll().where { Splits.id eq UUID.fromString(op.entityId) }.singleOrNull()
                 if (existing != null && existing[Splits.deletedAt] != null) return Triple("rejected", null, "deleted")
                 val newRev = (existing?.get(Splits.revision) ?: 0) + 1
@@ -144,12 +143,69 @@ class SyncService {
                         it[updatedAt] = now
                     }
                 } else {
-                    // ownership
-                    if (existing[Splits.userId] != userId) return Triple("rejected", null, "forbidden")
                     Splits.update({ Splits.id eq UUID.fromString(op.entityId) }) {
                         it[name] = m.name
                         it[isActive] = m.isActive
                         it[rotationPosition] = m.rotationPosition
+                        it[revision] = newRev
+                        it[updatedAt] = now
+                    }
+                }
+                Triple("applied", newRev, null)
+            }
+            "split_day" -> {
+                val m = json.decodeFromJsonElement<SplitDay>(data)
+                val existing = SplitDays.selectAll().where { SplitDays.id eq UUID.fromString(op.entityId) }.singleOrNull()
+                if (existing != null && existing[SplitDays.deletedAt] != null) return Triple("rejected", null, "deleted")
+                val newRev = (existing?.get(SplitDays.revision) ?: 0) + 1
+                val weekdaysStr = if (m.weekdays.isEmpty()) null else m.weekdays.joinToString(",")
+                if (existing == null) {
+                    SplitDays.insert {
+                        it[id] = UUID.fromString(op.entityId)
+                        it[splitId] = m.splitId
+                        it[name] = m.name
+                        it[weekdays] = weekdaysStr
+                        it[sortKey] = m.sortKey
+                        it[revision] = newRev
+                        it[createdAt] = now
+                        it[updatedAt] = now
+                    }
+                } else {
+                    SplitDays.update({ SplitDays.id eq UUID.fromString(op.entityId) }) {
+                        it[splitId] = m.splitId
+                        it[name] = m.name
+                        it[weekdays] = weekdaysStr
+                        it[sortKey] = m.sortKey
+                        it[revision] = newRev
+                        it[updatedAt] = now
+                    }
+                }
+                Triple("applied", newRev, null)
+            }
+            "split_day_exercise" -> {
+                val m = json.decodeFromJsonElement<SplitDayExercise>(data)
+                val existing = SplitDayExercises.selectAll().where { SplitDayExercises.id eq UUID.fromString(op.entityId) }.singleOrNull()
+                if (existing != null && existing[SplitDayExercises.deletedAt] != null) return Triple("rejected", null, "deleted")
+                val newRev = (existing?.get(SplitDayExercises.revision) ?: 0) + 1
+                if (existing == null) {
+                    SplitDayExercises.insert {
+                        it[id] = UUID.fromString(op.entityId)
+                        it[splitDayId] = m.splitDayId
+                        it[exerciseId] = m.exerciseId
+                        it[sortKey] = m.sortKey
+                        it[targetSets] = m.targetSets
+                        it[targetReps] = m.targetReps
+                        it[revision] = newRev
+                        it[createdAt] = now
+                        it[updatedAt] = now
+                    }
+                } else {
+                    SplitDayExercises.update({ SplitDayExercises.id eq UUID.fromString(op.entityId) }) {
+                        it[splitDayId] = m.splitDayId
+                        it[exerciseId] = m.exerciseId
+                        it[sortKey] = m.sortKey
+                        it[targetSets] = m.targetSets
+                        it[targetReps] = m.targetReps
                         it[revision] = newRev
                         it[updatedAt] = now
                     }
@@ -179,10 +235,33 @@ class SyncService {
             "split" -> {
                 val existing = Splits.selectAll().where { Splits.id eq UUID.fromString(op.entityId) }.singleOrNull()
                 if (existing == null) return Triple("applied", 1, null)
-                if (existing[Splits.userId] != userId) return Triple("rejected", null, "forbidden")
                 if (existing[Splits.deletedAt] != null) return Triple("applied", existing[Splits.revision], null)
                 val newRev = existing[Splits.revision] + 1
                 Splits.update({ Splits.id eq UUID.fromString(op.entityId) }) {
+                    it[deletedAt] = now
+                    it[revision] = newRev
+                    it[updatedAt] = now
+                }
+                Triple("applied", newRev, null)
+            }
+            "split_day" -> {
+                val existing = SplitDays.selectAll().where { SplitDays.id eq UUID.fromString(op.entityId) }.singleOrNull()
+                if (existing == null) return Triple("applied", 1, null)
+                if (existing[SplitDays.deletedAt] != null) return Triple("applied", existing[SplitDays.revision], null)
+                val newRev = existing[SplitDays.revision] + 1
+                SplitDays.update({ SplitDays.id eq UUID.fromString(op.entityId) }) {
+                    it[deletedAt] = now
+                    it[revision] = newRev
+                    it[updatedAt] = now
+                }
+                Triple("applied", newRev, null)
+            }
+            "split_day_exercise" -> {
+                val existing = SplitDayExercises.selectAll().where { SplitDayExercises.id eq UUID.fromString(op.entityId) }.singleOrNull()
+                if (existing == null) return Triple("applied", 1, null)
+                if (existing[SplitDayExercises.deletedAt] != null) return Triple("applied", existing[SplitDayExercises.revision], null)
+                val newRev = existing[SplitDayExercises.revision] + 1
+                SplitDayExercises.update({ SplitDayExercises.id eq UUID.fromString(op.entityId) }) {
                     it[deletedAt] = now
                     it[revision] = newRev
                     it[updatedAt] = now
@@ -214,7 +293,7 @@ class SyncService {
         }
     }
 
-    fun pull(userId: UUID, cursorStr: String, limit: Int): SyncPullResponse {
+    fun pull(userId: UUID, cursorStr: String, limit: Int): SyncPullResponse = transaction {
         val cursor = cursorStr.toLongOrNull() ?: 0L
         val rows = Changes.selectAll().where { (Changes.userId eq userId) and (Changes.seq greater cursor) }
             .orderBy(Changes.seq, SortOrder.ASC)
@@ -230,7 +309,7 @@ class SyncService {
         }
         val nextCursor = if (changes.isEmpty()) cursor else changes.last().seq
         val hasMore = changes.size == limit
-        return SyncPullResponse(changes, nextCursor.toString(), hasMore)
+        SyncPullResponse(changes, nextCursor.toString(), hasMore)
     }
 
     private fun fetchEntityData(entity: String, id: UUID, userId: UUID): JsonElement? {
@@ -244,7 +323,54 @@ class SyncService {
                     muscleGroup = row[Exercises.muscleGroup]?.let { MuscleGroup.valueOf(it) },
                     equipment = row[Exercises.equipment]?.let { Equipment.valueOf(it) },
                     isCustom = row[Exercises.isCustom],
-                    revision = row[Exercises.revision]
+                    revision = row[Exercises.revision],
+                    createdAt = row[Exercises.createdAt].toInstant(),
+                    updatedAt = row[Exercises.updatedAt].toInstant(),
+                    deletedAt = row[Exercises.deletedAt]?.toInstant()
+                ))
+            }
+            "split" -> {
+                val row = Splits.selectAll().where { Splits.id eq id }.singleOrNull() ?: return null
+                json.encodeToJsonElement(Split(
+                    id = row[Splits.id],
+                    userId = row[Splits.userId],
+                    name = row[Splits.name],
+                    isActive = row[Splits.isActive],
+                    rotationPosition = row[Splits.rotationPosition],
+                    revision = row[Splits.revision],
+                    createdAt = row[Splits.createdAt].toInstant(),
+                    updatedAt = row[Splits.updatedAt].toInstant(),
+                    deletedAt = row[Splits.deletedAt]?.toInstant()
+                ))
+            }
+            "split_day" -> {
+                val row = SplitDays.selectAll().where { SplitDays.id eq id }.singleOrNull() ?: return null
+                val weekdaysList = row[SplitDays.weekdays]?.split(",")?.mapNotNull { it.toIntOrNull() } ?: emptyList()
+                json.encodeToJsonElement(SplitDay(
+                    id = row[SplitDays.id],
+                    splitId = row[SplitDays.splitId],
+                    name = row[SplitDays.name],
+                    weekdays = weekdaysList,
+                    sortKey = row[SplitDays.sortKey],
+                    revision = row[SplitDays.revision],
+                    createdAt = row[SplitDays.createdAt].toInstant(),
+                    updatedAt = row[SplitDays.updatedAt].toInstant(),
+                    deletedAt = row[SplitDays.deletedAt]?.toInstant()
+                ))
+            }
+            "split_day_exercise" -> {
+                val row = SplitDayExercises.selectAll().where { SplitDayExercises.id eq id }.singleOrNull() ?: return null
+                json.encodeToJsonElement(SplitDayExercise(
+                    id = row[SplitDayExercises.id],
+                    splitDayId = row[SplitDayExercises.splitDayId],
+                    exerciseId = row[SplitDayExercises.exerciseId],
+                    sortKey = row[SplitDayExercises.sortKey],
+                    targetSets = row[SplitDayExercises.targetSets],
+                    targetReps = row[SplitDayExercises.targetReps],
+                    revision = row[SplitDayExercises.revision],
+                    createdAt = row[SplitDayExercises.createdAt].toInstant(),
+                    updatedAt = row[SplitDayExercises.updatedAt].toInstant(),
+                    deletedAt = row[SplitDayExercises.deletedAt]?.toInstant()
                 ))
             }
             else -> null
