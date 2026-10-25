@@ -744,6 +744,7 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
             "settings" -> WatchSettingsScreen(
                 serverClient = serverClient,
                 httpClient = httpClient,
+                onLaunchKeyboard = ::launchSystemKeyboard,
                 onGenerateQr = {
                     navigateTo("qr_pairing")
                 }
@@ -1750,13 +1751,13 @@ fun FinishWorkoutScreen(
 fun WatchSettingsScreen(
     serverClient: ServerClient,
     httpClient: HttpClient,
+    onLaunchKeyboard: (String, (String) -> Unit) -> Unit,
     onGenerateQr: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var urlText by remember { mutableStateOf(serverClient.serverUrl.ifBlank { "http://10.0.2.2:8081" }) }
     var saveStatus by remember { mutableStateOf<String?>(null) }
     var isChecking by remember { mutableStateOf(false) }
-    var showHostPresets by remember { mutableStateOf(false) }
 
     ScalingLazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1773,54 +1774,16 @@ fun WatchSettingsScreen(
         }
         item {
             Spacer(Modifier.height(2.dp))
-            Card(
-                onClick = { showHostPresets = !showHostPresets },
-                modifier = Modifier.fillMaxWidth(0.88f)
-            ) {
-                Column(Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = urlText,
-                        style = MaterialTheme.typography.body2,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = if (showHostPresets) "Close options" else "Tap to change host",
-                        style = MaterialTheme.typography.caption2,
-                        color = MaterialTheme.colors.primary
-                    )
-                }
-            }
-        }
-
-        if (showHostPresets) {
-            item {
-                Spacer(Modifier.height(2.dp))
-                Text("Select Host Preset:", style = MaterialTheme.typography.caption2, color = MaterialTheme.colors.onSurfaceVariant)
-            }
-            item {
-                CompactChip(
-                    onClick = { urlText = "http://10.0.2.2:8081"; showHostPresets = false },
-                    label = { Text("10.0.2.2:8081 (Emulator)") },
-                    modifier = Modifier.fillMaxWidth(0.85f).padding(vertical = 1.dp)
-                )
-            }
-            item {
-                CompactChip(
-                    onClick = { urlText = "http://192.168.1.100:8081"; showHostPresets = false },
-                    label = { Text("192.168.1.100:8081 (LAN)") },
-                    modifier = Modifier.fillMaxWidth(0.85f).padding(vertical = 1.dp)
-                )
-            }
-            item {
-                CompactChip(
-                    onClick = { urlText = "http://localhost:8081"; showHostPresets = false },
-                    label = { Text("localhost:8081") },
-                    modifier = Modifier.fillMaxWidth(0.85f).padding(vertical = 1.dp)
-                )
-            }
+            Chip(
+                onClick = {
+                    onLaunchKeyboard("Server URL") { typed ->
+                        urlText = typed
+                    }
+                },
+                label = { Text(if (urlText.isBlank()) "⌨ Type Server URL..." else urlText, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (urlText.isBlank()) MaterialTheme.colors.onSurfaceVariant else MaterialTheme.colors.primary) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
         }
 
         item {
