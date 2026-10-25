@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.0.20"
 }
 
 android {
@@ -28,6 +29,7 @@ android {
     }
     kotlinOptions {
         jvmTarget = "21"
+        freeCompilerArgs += listOf("-opt-in=androidx.compose.material3.ExperimentalMaterial3Api")
     }
     buildFeatures {
         compose = true
@@ -52,5 +54,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     implementation("com.patrykandpatrick.vico:compose-m3:2.0.0-alpha.28")
     implementation("com.patrykandpatrick.vico:core:2.0.0-alpha.28")
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

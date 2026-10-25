@@ -80,6 +80,7 @@ fun App() {
                 composable("history") { HistoryScreen(nav, workoutRepo) }
                 composable("progress") { ProgressScreen(nav, workoutRepo, exerciseRepo) }
                 composable("settings") { SettingsScreen(nav) }
+                composable("scan_device") { QrScannerScreen(nav) }
                 composable("split/{splitId}") { back ->
                     val id = back.arguments?.getString("splitId") ?: return@composable
                     SplitDetailScreen(nav, splitRepo, java.util.UUID.fromString(id))
