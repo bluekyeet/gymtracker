@@ -4,6 +4,8 @@ Repository: https://github.com/bluekyeet/gymtracker
 
 This document expands section 4.1.1 of `DESIGN.md`. For the home screen, if the two differ, this file wins.
 
+> **Implementation status.** Built: date + active split header, giant today's-day card, exercise preview, full-width START WORKOUT, all-split-days list with per-day start, in-progress banner with Resume, and the one-workout-at-a-time dialog. Not built: the week strip, the marked/done/missed states, rest-day marking, and showing last session's numbers per exercise. `split_days` stores `weekdays` (a list), not a single `weekday` — a day may fall on several days of the week.
+
 ## 1. Purpose
 
 The home screen is the first thing you see. Its job is to get you into today's workout with one tap. It is a full-screen design built around the current weekday, a very large Start workout button, and a clear fallback when there is no workout today.
@@ -17,7 +19,7 @@ It works fully offline and reads only from the local database.
 | Today | The current date in the device's time zone |
 | Week | Monday to Sunday, containing the selected date |
 | Active split | The one split marked `is_active` |
-| Scheduled day | A split day in the active split whose `weekday` matches a calendar day |
+| Scheduled day | A split day in the active split whose `weekdays` list contains today's ISO weekday (1 = Mon … 7 = Sun) |
 | Selected day | The day chip currently chosen in the week strip. Defaults to today |
 | In progress | A workout session with a start time and no end time |
 | Completed | A workout session with an end time |
