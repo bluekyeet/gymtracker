@@ -39,6 +39,7 @@ data class SplitDayEntity(
     @PrimaryKey val id: UUID,
     val splitId: UUID,
     val name: String,
+    val weekday: Int? = null,
     val sortKey: Double = 0.0,
     val revision: Long = 0,
     val createdAt: Instant = Instant.now(),

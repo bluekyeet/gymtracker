@@ -34,6 +34,7 @@ object SplitDays : Table("split_days") {
     val id = uuid("id")
     val splitId = uuid("split_id")
     val name = text("name")
+    val weekday = integer("weekday").nullable()
     val sortKey = double("sort_key").default(0.0)
     val revision = long("revision").default(0)
     val createdAt = timestampWithTimeZone("created_at")
