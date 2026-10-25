@@ -134,6 +134,59 @@ class WorkoutRepository(private val db: AppDatabase) {
         }
     }
 
+    /** Queues any locally existing workout sessions, exercises, and sets to the outbox if missing */
+    suspend fun backfillExistingWorkoutsToOutbox() {
+        db.withTransaction {
+            val existingEntityIds = db.outboxDao().getAll().map { it.entityId }.toSet()
+            val sessions = db.workoutSessionDao().getAll().first()
+            for (sessionEntity in sessions) {
+                val session = sessionEntity.toDomain()
+                if (session.id !in existingEntityIds) {
+                    db.outboxDao().insert(
+                        OutboxEntity(
+                            opId = UUID.randomUUID(),
+                            entity = "workout_session",
+                            entityId = session.id,
+                            type = "upsert",
+                            baseRevision = session.revision,
+                            dataJson = json.encodeToString(session)
+                        )
+                    )
+                }
+                for (weEntity in db.workoutExerciseDao().getBySession(session.id).first()) {
+                    val we = weEntity.toDomain()
+                    if (we.id !in existingEntityIds) {
+                        db.outboxDao().insert(
+                            OutboxEntity(
+                                opId = UUID.randomUUID(),
+                                entity = "workout_exercise",
+                                entityId = we.id,
+                                type = "upsert",
+                                baseRevision = we.revision,
+                                dataJson = json.encodeToString(we)
+                            )
+                        )
+                    }
+                    for (setEntity in db.setDao().listByWorkoutExercise(we.id)) {
+                        val set = setEntity.toDomain()
+                        if (set.id !in existingEntityIds) {
+                            db.outboxDao().insert(
+                                OutboxEntity(
+                                    opId = UUID.randomUUID(),
+                                    entity = "set",
+                                    entityId = set.id,
+                                    type = "upsert",
+                                    baseRevision = set.revision,
+                                    dataJson = json.encodeToString(set)
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /** The sets logged for [exerciseId] in the most recent session started before [before]. */
     suspend fun lastSessionSets(exerciseId: UUID, before: Instant): Pair<WorkoutSession, List<SetEntry>>? {
         val sessionId = db.workoutExerciseDao().getLatestSessionIdFor(exerciseId, before) ?: return null

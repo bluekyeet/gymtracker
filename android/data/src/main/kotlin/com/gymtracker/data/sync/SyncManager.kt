@@ -35,6 +35,7 @@ class SyncManager(private val context: Context, private val db: AppDatabase) {
 
     suspend fun pushPending(baseUrl: String, token: String, deviceId: UUID, schemaVersion: Int, client: HttpClient) = withContext(Dispatchers.IO) {
         com.gymtracker.data.repository.SplitRepository(db).backfillExistingSplitsToOutbox()
+        com.gymtracker.data.repository.WorkoutRepository(db).backfillExistingWorkoutsToOutbox()
         val outbox = db.outboxDao().getAll()
         if (outbox.isEmpty()) return@withContext
         val entityOrder = mapOf("exercise" to 1, "split" to 2, "split_day" to 3, "split_day_exercise" to 4, "workout_session" to 5, "workout_exercise" to 6, "set" to 7)
