@@ -32,7 +32,7 @@ data class SplitDay(
     val id: UUID,
     val splitId: UUID,
     val name: String,
-    val weekday: Int? = null,
+    val weekdays: List<Int> = emptyList(),
     val sortKey: Double = 0.0,
     val revision: Long = 0,
     val createdAt: Instant = Instant.now(),

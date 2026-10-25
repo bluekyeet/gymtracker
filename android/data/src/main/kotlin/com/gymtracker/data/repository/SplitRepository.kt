@@ -17,6 +17,8 @@ class SplitRepository(private val db: AppDatabase) {
 
     suspend fun save(split: Split) = db.splitDao().upsert(split.toEntity())
 
+    suspend fun setActive(id: UUID) = db.splitDao().setActive(id)
+
     suspend fun softDeleteSplit(id: UUID) {
         val now = java.time.Instant.now()
         db.splitDao().softDelete(id, now, now)

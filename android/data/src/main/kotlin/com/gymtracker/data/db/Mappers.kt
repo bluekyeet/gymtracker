@@ -9,8 +9,8 @@ fun Exercise.toEntity() = ExerciseEntity(id, userId, name, muscleGroup, equipmen
 fun SplitEntity.toDomain() = Split(id, userId, name, isActive, rotationPosition, revision, createdAt, updatedAt, deletedAt)
 fun Split.toEntity() = SplitEntity(id, userId, name, isActive, rotationPosition, revision, createdAt, updatedAt, deletedAt)
 
-fun SplitDayEntity.toDomain() = SplitDay(id, splitId, name, weekday, sortKey, revision, createdAt, updatedAt, deletedAt)
-fun SplitDay.toEntity() = SplitDayEntity(id, splitId, name, weekday, sortKey, revision, createdAt, updatedAt, deletedAt)
+fun SplitDayEntity.toDomain() = SplitDay(id, splitId, name, weekdays?.split(",")?.mapNotNull { it.toIntOrNull() } ?: emptyList(), sortKey, revision, createdAt, updatedAt, deletedAt)
+fun SplitDay.toEntity() = SplitDayEntity(id, splitId, name, if (weekdays.isEmpty()) null else weekdays.joinToString(","), sortKey, revision, createdAt, updatedAt, deletedAt)
 
 fun SplitDayExerciseEntity.toDomain() = SplitDayExercise(id, splitDayId, exerciseId, sortKey, targetSets, targetReps, revision, createdAt, updatedAt, deletedAt)
 fun SplitDayExercise.toEntity() = SplitDayExerciseEntity(id, splitDayId, exerciseId, sortKey, targetSets, targetReps, revision, createdAt, updatedAt, deletedAt)

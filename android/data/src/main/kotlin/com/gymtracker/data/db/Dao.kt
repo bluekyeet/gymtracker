@@ -43,6 +43,9 @@ interface SplitDao {
 
     @Query("UPDATE splits SET deletedAt = :deletedAt, updatedAt = :updatedAt WHERE id = :id")
     suspend fun softDelete(id: UUID, deletedAt: Instant, updatedAt: Instant)
+
+    @Query("UPDATE splits SET isActive = CASE WHEN id = :activeId THEN 1 ELSE 0 END WHERE deletedAt IS NULL")
+    suspend fun setActive(activeId: UUID)
 }
 
 @Dao
@@ -88,6 +91,9 @@ interface WorkoutSessionDao {
 
     @Query("SELECT * FROM workout_sessions WHERE id = :id")
     suspend fun getById(id: UUID): WorkoutSessionEntity?
+
+    @Query("SELECT * FROM workout_sessions WHERE endedAt IS NULL AND deletedAt IS NULL ORDER BY startedAt DESC LIMIT 1")
+    suspend fun getInProgress(): WorkoutSessionEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: WorkoutSessionEntity)
