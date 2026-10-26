@@ -1,11 +1,17 @@
 package com.gymtracker.app.ui
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,7 +40,7 @@ private fun compareGroups(a: String, b: String): Int {
     return a.lowercase().compareTo(b.lowercase())
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
     val exercises by exerciseRepo.observeAll().collectAsState(initial = emptyList())
@@ -44,6 +50,10 @@ fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
     var groupFilter by remember { mutableStateOf<String?>(null) }
     var creating by remember { mutableStateOf(false) }
     var toDelete by remember { mutableStateOf<Exercise?>(null) }
+
+    var selectMode by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<Set<UUID>>(emptySet()) }
+    var showBulkDeleteDialog by remember { mutableStateOf(false) }
 
     // Fuzzy match on the name or the group, so "ch" finds everything in Chest.
     val visible = exercises
@@ -62,6 +72,27 @@ fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
             ExerciseSection(title = group, exercises = list.sortedBy { it.name.lowercase() })
         }
 
+    if (showBulkDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showBulkDeleteDialog = false },
+            title = { Text("Delete ${selected.size} exercise${if (selected.size == 1) "" else "s"}?") },
+            text = { Text("Removed from your library. Past workouts keep their record of them.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val toDelete = selected
+                        showBulkDeleteDialog = false
+                        selectMode = false
+                        selected = emptySet()
+                        scope.launch { toDelete.forEach { exerciseRepo.softDelete(it) } }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { showBulkDeleteDialog = false }) { Text("Cancel") } }
+        )
+    }
+
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -71,9 +102,39 @@ fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            IconButton(onClick = { creating = true }) {
-                Icon(Icons.Filled.Add, contentDescription = "New exercise")
+            if (selectMode) {
+                TextButton(onClick = {
+                    selected = if (selected.size == visible.size) emptySet() else visible.map { it.id }.toSet()
+                }) {
+                    Text(if (selected.size == visible.size) "Deselect all" else "Select all")
+                }
+                IconButton(onClick = { showBulkDeleteDialog = true }, enabled = selected.isNotEmpty()) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete selected",
+                        tint = if (selected.isNotEmpty()) MaterialTheme.colorScheme.error
+                               else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = { selectMode = false; selected = emptySet() }) {
+                    Icon(Icons.Default.Close, contentDescription = "Cancel selection")
+                }
+            } else {
+                if (exercises.isNotEmpty()) {
+                    TextButton(onClick = { selectMode = true }) { Text("Select") }
+                }
+                IconButton(onClick = { creating = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "New exercise")
+                }
             }
+        }
+        if (selectMode) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Tap exercises to select them",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
         Spacer(Modifier.height(8.dp))
 
@@ -130,15 +191,43 @@ fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
                         )
                     }
                     items(section.exercises, key = { it.id }) { ex ->
+                        var menuOpen by remember(ex.id) { mutableStateOf(false) }
+                        val isSelected = ex.id in selected
                         Card(
                             Modifier
                                 .fillMaxWidth()
-                                .clickable { nav.navigate("exercise/${ex.id}") }
+                                .combinedClickable(
+                                    onClick = {
+                                        if (selectMode) {
+                                            selected = if (isSelected) selected - ex.id else selected + ex.id
+                                        } else {
+                                            nav.navigate("exercise/${ex.id}")
+                                        }
+                                    },
+                                    onLongClick = {
+                                        if (!selectMode) {
+                                            selectMode = true
+                                            selected = setOf(ex.id)
+                                        }
+                                    }
+                                ),
+                            colors = if (isSelected)
+                                CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                            else CardDefaults.cardColors()
                         ) {
                             Row(
                                 Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                if (selectMode) {
+                                    Icon(
+                                        if (isSelected) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
+                                        contentDescription = null,
+                                        tint = if (isSelected) MaterialTheme.colorScheme.primary
+                                               else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 12.dp)
+                                    )
+                                }
                                 Column(Modifier.weight(1f)) {
                                     Text(
                                         ex.name,
@@ -152,7 +241,38 @@ fun ExercisesScreen(nav: NavController, exerciseRepo: ExerciseRepository) {
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
-                                OutlinedButton(onClick = { toDelete = ex }) { Text("Delete") }
+                                if (!selectMode) {
+                                    Box {
+                                        IconButton(onClick = { menuOpen = true }) {
+                                            Icon(Icons.Filled.MoreVert, contentDescription = "Actions for ${ex.name}")
+                                        }
+                                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                            DropdownMenuItem(
+                                                text = { Text("Open") },
+                                                onClick = {
+                                                    menuOpen = false
+                                                    nav.navigate("exercise/${ex.id}")
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Select") },
+                                                onClick = {
+                                                    menuOpen = false
+                                                    selectMode = true
+                                                    selected = setOf(ex.id)
+                                                }
+                                            )
+                                            HorizontalDivider()
+                                            DropdownMenuItem(
+                                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                                onClick = {
+                                                    menuOpen = false
+                                                    toDelete = ex
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

@@ -7,7 +7,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,6 +33,7 @@ fun HistoryScreen(nav: NavController, workoutRepo: WorkoutRepository) {
     var selectMode by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<UUID>>(emptySet()) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var singleToDelete by remember { mutableStateOf<UUID?>(null) }
 
     val dateFormatter = DateTimeFormatter.ofPattern("EEE, d MMM yyyy").withZone(ZoneId.systemDefault())
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
@@ -43,12 +46,13 @@ fun HistoryScreen(nav: NavController, workoutRepo: WorkoutRepository) {
             confirmButton = {
                 TextButton(
                     onClick = {
-                        scope.launch {
-                            selected.forEach { workoutRepo.softDeleteSession(it) }
-                        }
+                        val toDelete = selected
                         showDeleteDialog = false
                         selectMode = false
                         selected = emptySet()
+                        scope.launch {
+                            toDelete.forEach { workoutRepo.softDeleteSession(it) }
+                        }
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text("Delete") }
@@ -56,6 +60,25 @@ fun HistoryScreen(nav: NavController, workoutRepo: WorkoutRepository) {
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
             }
+        )
+    }
+
+    if (singleToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { singleToDelete = null },
+            title = { Text("Delete this workout?") },
+            text = { Text("This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val id = singleToDelete
+                        singleToDelete = null
+                        if (id != null) scope.launch { workoutRepo.softDeleteSession(id) }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { singleToDelete = null }) { Text("Cancel") } }
         )
     }
 
@@ -86,10 +109,21 @@ fun HistoryScreen(nav: NavController, workoutRepo: WorkoutRepository) {
                                else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                TextButton(onClick = { selectMode = false; selected = emptySet() }) {
-                    Text("Cancel")
+                IconButton(onClick = { selectMode = false; selected = emptySet() }) {
+                    Icon(Icons.Default.Close, contentDescription = "Cancel selection")
                 }
+            } else if (sessions.isNotEmpty()) {
+                TextButton(onClick = { selectMode = true }) { Text("Select") }
             }
+        }
+
+        if (selectMode) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Tap workouts to select them",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
 
         Spacer(Modifier.height(12.dp))
@@ -108,6 +142,7 @@ fun HistoryScreen(nav: NavController, workoutRepo: WorkoutRepository) {
                 items(sessions, key = { it.id }) { s ->
                     val inProgress = s.endedAt == null
                     val isSelected = s.id in selected
+                    var menuOpen by remember(s.id) { mutableStateOf(false) }
 
                     Card(
                         Modifier
@@ -116,8 +151,10 @@ fun HistoryScreen(nav: NavController, workoutRepo: WorkoutRepository) {
                                 onClick = {
                                     if (selectMode) {
                                         selected = if (isSelected) selected - s.id else selected + s.id
-                                    } else {
+                                    } else if (inProgress) {
                                         nav.navigate("workout/${s.id}")
+                                    } else {
+                                        nav.navigate("workout_detail/${s.id}")
                                     }
                                 },
                                 onLongClick = {
@@ -172,6 +209,31 @@ fun HistoryScreen(nav: NavController, workoutRepo: WorkoutRepository) {
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.primary
                                     )
+                                }
+                            }
+                            if (!selectMode) {
+                                Box {
+                                    IconButton(onClick = { menuOpen = true }) {
+                                        Icon(Icons.Filled.MoreVert, contentDescription = "Actions for this workout")
+                                    }
+                                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text("Select") },
+                                            onClick = {
+                                                menuOpen = false
+                                                selectMode = true
+                                                selected = setOf(s.id)
+                                            }
+                                        )
+                                        HorizontalDivider()
+                                        DropdownMenuItem(
+                                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                            onClick = {
+                                                menuOpen = false
+                                                singleToDelete = s.id
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
