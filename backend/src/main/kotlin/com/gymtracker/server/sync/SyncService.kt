@@ -20,21 +20,35 @@ class SyncService {
             val userRow = Users.selectAll().where { Users.id eq userId }.forUpdate().single()
             var seq = userRow[Users.lastSeq]
             val results = mutableListOf<OpResult>()
+            // One bulk idempotency check instead of a SELECT per op — this used to be the main
+            // cost of re-pushing a large outbox (every already-applied op still cost a round trip).
+            val opIds = req.operations.map { UUID.fromString(it.opId) }
+            val existingResults = if (opIds.isEmpty()) emptyMap() else
+                AppliedOps.selectAll().where { AppliedOps.opId inList opIds }
+                    .associate { it[AppliedOps.opId] to it[AppliedOps.result] }
             for (op in req.operations) {
                 // idempotency
-                val existingOp = AppliedOps.selectAll().where { AppliedOps.opId eq UUID.fromString(op.opId) }.singleOrNull()
-                if (existingOp != null) {
-                    // return stored result (simplified: retry? we stored JSON? We'll store status:revision)
-                    val stored = existingOp[AppliedOps.result]
+                val stored = existingResults[UUID.fromString(op.opId)]
+                if (stored != null) {
                     // stored format "applied:5" or "rejected:deleted"
                     val parts = stored.split(":", limit = 2)
                     results.add(OpResult(op.opId, parts[0], parts.getOrNull(1)?.toLongOrNull(), parts.getOrNull(1)?.takeIf { !it.all { c -> c.isDigit() } }))
                     continue
                 }
-                val applied = processOp(userId, op, seq) { newSeq -> seq = newSeq }
-                // processOp increments seq internally? We'll handle here.
-                results.add(applied.first)
-                if (applied.second) seq = applied.third
+                // Isolate each op in its own savepoint: one bad op (e.g. a dangling FK)
+                // must not roll back every other op already applied in this push batch.
+                val savepoint = "sp_${op.opId.replace("-", "")}"
+                exec("SAVEPOINT $savepoint")
+                try {
+                    val applied = processOp(userId, op, seq) { newSeq -> seq = newSeq }
+                    exec("RELEASE SAVEPOINT $savepoint")
+                    results.add(applied.first)
+                    if (applied.second) seq = applied.third
+                } catch (e: Exception) {
+                    exec("ROLLBACK TO SAVEPOINT $savepoint")
+                    storeOp(UUID.fromString(op.opId), userId, "rejected:server_error")
+                    results.add(OpResult(op.opId, "rejected", reason = "server_error: ${e.message?.take(200)}"))
+                }
             }
             // update user last_seq
             Users.update({ Users.id eq userId }) { it[lastSeq] = seq }
@@ -298,6 +312,7 @@ class SyncService {
                 }
                 Triple("applied", newRev, null)
             }
+            else -> Triple("rejected", null, "unsupported_entity")
         }
     }
 
@@ -420,12 +435,20 @@ class SyncService {
             .orderBy(Changes.seq, SortOrder.ASC)
             .limit(limit)
             .toList()
+
+        // Batch-fetch the actual row data per entity type (one query per type covering every id
+        // in this page) instead of one query per changed row. A page of 100 changes used to be
+        // ~100 sequential round trips; now it's at most 6 (one per entity type present).
+        val idsByEntity = rows.filterNot { it[Changes.deleted] }
+            .groupBy({ it[Changes.entity] }, { it[Changes.entityId] })
+        val dataByEntityAndId = idsByEntity.mapValues { (entity, ids) -> fetchEntityDataBulk(entity, ids.distinct()) }
+
         val changes = rows.map { row ->
             val entity = row[Changes.entity]
             val entityId = row[Changes.entityId]
             val deleted = row[Changes.deleted]
             val revision = row[Changes.revision]
-            val data = if (deleted) null else fetchEntityData(entity, entityId, userId)
+            val data = if (deleted) null else dataByEntityAndId[entity]?.get(entityId)
             ChangeDto(row[Changes.seq], entity, entityId.toString(), revision, deleted, data)
         }
         val nextCursor = if (changes.isEmpty()) cursor else changes.last().seq
@@ -433,11 +456,11 @@ class SyncService {
         SyncPullResponse(changes, nextCursor.toString(), hasMore)
     }
 
-    private fun fetchEntityData(entity: String, id: UUID, userId: UUID): JsonElement? {
+    private fun fetchEntityDataBulk(entity: String, ids: List<UUID>): Map<UUID, JsonElement> {
+        if (ids.isEmpty()) return emptyMap()
         return when (entity) {
-            "exercise" -> {
-                val row = Exercises.selectAll().where { Exercises.id eq id }.singleOrNull() ?: return null
-                json.encodeToJsonElement(Exercise(
+            "exercise" -> Exercises.selectAll().where { Exercises.id inList ids }.associate { row ->
+                row[Exercises.id] to json.encodeToJsonElement(Exercise(
                     id = row[Exercises.id],
                     userId = row[Exercises.userId],
                     name = row[Exercises.name],
@@ -450,9 +473,8 @@ class SyncService {
                     deletedAt = row[Exercises.deletedAt]?.toInstant()
                 ))
             }
-            "split" -> {
-                val row = Splits.selectAll().where { Splits.id eq id }.singleOrNull() ?: return null
-                json.encodeToJsonElement(Split(
+            "split" -> Splits.selectAll().where { Splits.id inList ids }.associate { row ->
+                row[Splits.id] to json.encodeToJsonElement(Split(
                     id = row[Splits.id],
                     userId = row[Splits.userId],
                     name = row[Splits.name],
@@ -464,10 +486,9 @@ class SyncService {
                     deletedAt = row[Splits.deletedAt]?.toInstant()
                 ))
             }
-            "split_day" -> {
-                val row = SplitDays.selectAll().where { SplitDays.id eq id }.singleOrNull() ?: return null
+            "split_day" -> SplitDays.selectAll().where { SplitDays.id inList ids }.associate { row ->
                 val weekdaysList = row[SplitDays.weekdays]?.split(",")?.mapNotNull { it.toIntOrNull() } ?: emptyList()
-                json.encodeToJsonElement(SplitDay(
+                row[SplitDays.id] to json.encodeToJsonElement(SplitDay(
                     id = row[SplitDays.id],
                     splitId = row[SplitDays.splitId],
                     name = row[SplitDays.name],
@@ -479,9 +500,8 @@ class SyncService {
                     deletedAt = row[SplitDays.deletedAt]?.toInstant()
                 ))
             }
-            "split_day_exercise" -> {
-                val row = SplitDayExercises.selectAll().where { SplitDayExercises.id eq id }.singleOrNull() ?: return null
-                json.encodeToJsonElement(SplitDayExercise(
+            "split_day_exercise" -> SplitDayExercises.selectAll().where { SplitDayExercises.id inList ids }.associate { row ->
+                row[SplitDayExercises.id] to json.encodeToJsonElement(SplitDayExercise(
                     id = row[SplitDayExercises.id],
                     splitDayId = row[SplitDayExercises.splitDayId],
                     exerciseId = row[SplitDayExercises.exerciseId],
@@ -494,9 +514,8 @@ class SyncService {
                     deletedAt = row[SplitDayExercises.deletedAt]?.toInstant()
                 ))
             }
-            "workout_session" -> {
-                val row = WorkoutSessions.selectAll().where { WorkoutSessions.id eq id }.singleOrNull() ?: return null
-                json.encodeToJsonElement(WorkoutSession(
+            "workout_session" -> WorkoutSessions.selectAll().where { WorkoutSessions.id inList ids }.associate { row ->
+                row[WorkoutSessions.id] to json.encodeToJsonElement(WorkoutSession(
                     id = row[WorkoutSessions.id],
                     userId = row[WorkoutSessions.userId],
                     splitDayId = row[WorkoutSessions.splitDayId],
@@ -510,9 +529,8 @@ class SyncService {
                     deletedAt = row[WorkoutSessions.deletedAt]?.toInstant()
                 ))
             }
-            "workout_exercise" -> {
-                val row = WorkoutExercises.selectAll().where { WorkoutExercises.id eq id }.singleOrNull() ?: return null
-                json.encodeToJsonElement(WorkoutExercise(
+            "workout_exercise" -> WorkoutExercises.selectAll().where { WorkoutExercises.id inList ids }.associate { row ->
+                row[WorkoutExercises.id] to json.encodeToJsonElement(WorkoutExercise(
                     id = row[WorkoutExercises.id],
                     sessionId = row[WorkoutExercises.sessionId],
                     exerciseId = row[WorkoutExercises.exerciseId],
@@ -524,9 +542,8 @@ class SyncService {
                     deletedAt = row[WorkoutExercises.deletedAt]?.toInstant()
                 ))
             }
-            "set" -> {
-                val row = Sets.selectAll().where { Sets.id eq id }.singleOrNull() ?: return null
-                json.encodeToJsonElement(SetEntry(
+            "set" -> Sets.selectAll().where { Sets.id inList ids }.associate { row ->
+                row[Sets.id] to json.encodeToJsonElement(SetEntry(
                     id = row[Sets.id],
                     workoutExerciseId = row[Sets.workoutExerciseId],
                     setNumber = row[Sets.setNumber],
@@ -540,6 +557,7 @@ class SyncService {
                     deletedAt = row[Sets.deletedAt]?.toInstant()
                 ))
             }
+            else -> emptyMap()
         }
     }
 }
