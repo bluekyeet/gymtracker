@@ -313,6 +313,9 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                 onOpenEditSplits = {
                     navigateTo("edit_splits")
                 },
+                onOpenHistory = {
+                    navigateTo("history")
+                },
                 onOpenSettings = {
                     navigateTo("settings")
                 }
@@ -747,6 +750,21 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                 onCancel = { navigateBack() }
             )
 
+            "history" -> HistoryScreen(
+                workoutRepo = workoutRepo,
+                onDeleteSession = { session ->
+                    deleteConfirmTitle = "Delete Workout"
+                    deleteConfirmMessage = "Delete '${session.dayName ?: "Workout"}'? This cannot be undone."
+                    deleteConfirmAction = {
+                        scope.launch {
+                            workoutRepo.softDeleteSession(session.id)
+                            if (serverClient.serverUrl.isNotBlank()) triggerSync()
+                        }
+                    }
+                    navigateTo("confirm_delete")
+                }
+            )
+
             "settings" -> WatchSettingsScreen(
                 serverClient = serverClient,
                 httpClient = httpClient,
@@ -775,6 +793,7 @@ fun HomeScreen(
     onResumeWorkout: () -> Unit,
     onStartWorkout: (String, List<Exercise>) -> Unit,
     onOpenEditSplits: () -> Unit,
+    onOpenHistory: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     var activeSplit by remember { mutableStateOf<Split?>(null) }
@@ -936,7 +955,17 @@ fun HomeScreen(
             )
         }
 
-        // 2. Sync
+        // 2. History
+        item {
+            Chip(
+                onClick = onOpenHistory,
+                label = { Text("History") },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+
+        // 3. Sync
         item {
             Chip(
                 onClick = {
@@ -1064,6 +1093,80 @@ fun EditSplitsScreen(
                         colors = ButtonDefaults.secondaryButtonColors()
                     ) {
                         Text("⋮", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        item {
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun HistoryScreen(
+    workoutRepo: WorkoutRepository,
+    onDeleteSession: (WorkoutSession) -> Unit
+) {
+    val sessions by workoutRepo.observeSessions().collectAsState(initial = emptyList())
+    val dateFormatter = remember {
+        DateTimeFormatter.ofPattern("d MMM, HH:mm").withZone(java.time.ZoneId.systemDefault())
+    }
+
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        autoCentering = null,
+        contentPadding = PaddingValues(top = 28.dp, bottom = 48.dp, start = 10.dp, end = 10.dp)
+    ) {
+        item {
+            Text("History", style = MaterialTheme.typography.title3, textAlign = TextAlign.Center)
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+        }
+        if (sessions.isEmpty()) {
+            item {
+                Text(
+                    "No workouts yet",
+                    style = MaterialTheme.typography.body2,
+                    color = MaterialTheme.colors.onSurfaceVariant
+                )
+            }
+        } else {
+            items(sessions.size) { idx ->
+                val session = sessions[idx]
+                val inProgress = session.endedAt == null
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.92f).padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Chip(
+                        onClick = {},
+                        label = {
+                            Text(
+                                session.dayName ?: "Workout",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        secondaryLabel = {
+                            Text(
+                                if (inProgress) "In progress" else dateFormatter.format(session.startedAt),
+                                fontSize = 10.sp,
+                                color = if (inProgress) MaterialTheme.colors.primary else MaterialTheme.colors.onSurfaceVariant
+                            )
+                        },
+                        colors = ChipDefaults.secondaryChipColors(),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    CompactButton(
+                        onClick = { onDeleteSession(session) },
+                        colors = ButtonDefaults.secondaryButtonColors()
+                    ) {
+                        Text("✕", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colors.error)
                     }
                 }
             }
