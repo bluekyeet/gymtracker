@@ -41,7 +41,7 @@ The backend and website run together via the root `compose.yaml`. PostgreSQL is 
 
 ```text
 cp .env.example .env
-# edit .env: set POSTGRES_PASSWORD, JWT_SECRET, and anything else you don't want left at the example value
+# edit .env: set POSTGRES_PASSWORD, TOKEN_SIGNING_KEY, and ENROLLMENT_KEY to real values
 
 docker compose up -d --build
 ```
@@ -58,9 +58,9 @@ Check it's alive:
 curl http://localhost:8081/v1/health
 ```
 
-Create the owner account and an enrollment key using the server's account-creation command (there is no public registration — see `docs/AUTHENTICATION.md`). Devices (phone, watch) use that enrollment key once, from the app's Settings screen or by scanning a pairing QR code, to receive their own long-lived device credentials.
+There is no public registration (see `docs/AUTHENTICATION.md`): the only account is created automatically, the first time any device enrolls, using the `ENROLLMENT_KEY` you set in `.env`. Point a phone or watch at the server with that key (Settings screen, or scan a pairing QR code) and it becomes the owner's first device, receiving its own long-lived credentials. Enroll every other device the same way, with the same key.
 
-For a real deployment (not local), see `docs/DEPLOYMENT.md` for the `compose.prod.yaml` overlay and `infra/scripts/init-secrets.sh`.
+For a real deployment (not local), run `infra/scripts/init-secrets.sh` first to generate random secrets into `.env.secrets` (it prints the enrollment key you'll need), then see `docs/DEPLOYMENT.md` for the `compose.prod.yaml` overlay.
 
 ### 2. Android apps (phone + watch)
 
@@ -88,4 +88,8 @@ npm run dev        # local development
 npm run build       # production build, served by the web service in compose.yaml
 ```
 
-Set `PUBLIC_API_BASE_URL` (see `compose.yaml`) to point the website at your API.
+Set `VITE_API_BASE` before `npm run build` to point the website at your API — it's read at build time, not from the container's runtime environment, so changing it after building does nothing.
+
+### Known gaps in server configuration
+
+Some variables referenced in `compose.yaml` / `compose.secrets.example.yaml` aren't wired up in the backend yet and currently do nothing: `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ALLOWED_ORIGIN` (no CORS plugin is installed), and `ENROLLMENT_ENABLED`. The website's `/v1/auth/login` is also not practically usable yet — there's no server command that sets the owner's password, only device enrollment via `ENROLLMENT_KEY`. `.env.example` only lists variables the backend actually reads today.
