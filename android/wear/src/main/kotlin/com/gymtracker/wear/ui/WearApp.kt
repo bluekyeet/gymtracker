@@ -165,6 +165,9 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
     var currentSets by remember { mutableStateOf<List<SetEntry>>(emptyList()) }
     var weightInput by remember { mutableDoubleStateOf(60.0) }
     var repsInput by remember { mutableIntStateOf(8) }
+    var lastSessionSetsInfo by remember { mutableStateOf<List<SetEntry>>(emptyList()) }
+    var targetSetsInfo by remember { mutableStateOf<Int?>(null) }
+    var targetRepsInfo by remember { mutableStateOf<Int?>(null) }
 
     // Rest timer state
     var restSecondsLeft by remember { mutableIntStateOf(60) }
@@ -223,6 +226,22 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
         if (exId != null) {
             val sets = workoutRepo.observeSets(exId).first()
             currentSets = sets
+
+            // Load last session sets & plan targets for display info
+            val sessionStarted = activeSession?.startedAt ?: java.time.Instant.now()
+            val lastPair = if (exerciseLibId != null) {
+                workoutRepo.lastSessionSets(exerciseLibId, sessionStarted)
+            } else null
+            lastSessionSetsInfo = lastPair?.second ?: emptyList()
+
+            val dayExercises = if (exerciseLibId != null) {
+                val dayId = activeSession?.splitDayId
+                if (dayId != null) splitRepo.observeDayExercises(dayId).first() else emptyList()
+            } else emptyList()
+            val matchDe = dayExercises.firstOrNull { it.exerciseId == exerciseLibId }
+            targetSetsInfo = matchDe?.targetSets
+            targetRepsInfo = matchDe?.targetReps
+
             if (sets.isNotEmpty()) {
                 // Already logged sets this session — pre-fill from last logged set
                 val last = sets.last()
@@ -230,28 +249,18 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                 repsInput = last.reps
             } else {
                 // No sets yet — use last session's weight, and target reps from split plan
-                val sessionStarted = activeSession?.startedAt ?: java.time.Instant.now()
-                val lastWeight = if (exerciseLibId != null) {
-                    workoutRepo.lastSessionSets(exerciseLibId, sessionStarted)
-                        ?.second?.filter { it.setType != com.gymtracker.shared.domain.SetType.WARMUP }
-                        ?.maxByOrNull { it.weightKg }?.weightKg
-                } else null
-
-                // Target reps from split plan — find matching SplitDayExercise
-                val targetReps = if (exerciseLibId != null) {
-                    val session = activeSession
-                    val dayId = session?.splitDayId
-                    if (dayId != null) {
-                        val dayExercises = splitRepo.observeDayExercises(dayId).first()
-                        dayExercises.firstOrNull { it.exerciseId == exerciseLibId }?.targetReps
-                    } else null
-                } else null
+                val lastWeight = lastSessionSetsInfo
+                    .filter { it.setType != com.gymtracker.shared.domain.SetType.WARMUP }
+                    .maxByOrNull { it.weightKg }?.weightKg
 
                 if (lastWeight != null) weightInput = lastWeight
-                if (targetReps != null) repsInput = targetReps
+                if (matchDe?.targetReps != null) repsInput = matchDe.targetReps!!
             }
         } else {
             currentSets = emptyList()
+            lastSessionSetsInfo = emptyList()
+            targetSetsInfo = null
+            targetRepsInfo = null
         }
     }
 
@@ -350,6 +359,9 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                         sets = currentSets,
                         weight = weightInput,
                         reps = repsInput,
+                        lastSessionSets = lastSessionSetsInfo,
+                        targetSets = targetSetsInfo,
+                        targetReps = targetRepsInfo,
                         onWeightChange = { weightInput = (it * 10.0).coerceAtLeast(0.0).let { Math.round(it) / 10.0 } },
                         onRepsChange = { repsInput = it.coerceAtLeast(0) },
                         onPrevExercise = {
@@ -2081,6 +2093,9 @@ fun WorkoutLoggingScreen(
     sets: List<SetEntry>,
     weight: Double,
     reps: Int,
+    lastSessionSets: List<SetEntry>,
+    targetSets: Int?,
+    targetReps: Int?,
     onWeightChange: (Double) -> Unit,
     onRepsChange: (Int) -> Unit,
     onPrevExercise: () -> Unit,
@@ -2125,6 +2140,42 @@ fun WorkoutLoggingScreen(
                 style = MaterialTheme.typography.caption2,
                 color = MaterialTheme.colors.onSurfaceVariant
             )
+        }
+
+        // Target plan info or last session info summary card
+        item {
+            Spacer(Modifier.height(4.dp))
+            Column(
+                modifier = Modifier.fillMaxWidth(0.88f),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (targetSets != null || targetReps != null) {
+                    Text(
+                        "Target: ${targetSets ?: "?"} sets × ${targetReps ?: "?"} reps",
+                        style = MaterialTheme.typography.caption3,
+                        color = MaterialTheme.colors.primary,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                if (lastSessionSets.isNotEmpty()) {
+                    val prevText = lastSessionSets.joinToString(", ") { "${it.weightKg}kg×${it.reps}" }
+                    Text(
+                        "Last: $prevText",
+                        style = MaterialTheme.typography.caption3,
+                        color = MaterialTheme.colors.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Text(
+                        "First time doing this exercise",
+                        style = MaterialTheme.typography.caption3,
+                        color = MaterialTheme.colors.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
         }
 
         item {
