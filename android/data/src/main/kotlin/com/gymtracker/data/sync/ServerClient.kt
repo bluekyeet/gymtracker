@@ -60,6 +60,15 @@ class ServerClient(private val context: Context, private val db: AppDatabase) {
         get() = prefs.getString("paired_watch_device_id", null)
         set(value) = prefs.edit().putString("paired_watch_device_id", value).apply()
 
+    // The enrollment key the user actually typed/scanned for this device. Used to (re)enroll
+    // automatically if the stored tokens are ever cleared. Previously this fell back silently to
+    // the compose.yaml default key, which fails with "Invalid enrollment key" on any server that
+    // changed ENROLLMENT_KEY (every real deployment, per README) — the device never had a way to
+    // tell the server its real key.
+    var enrollmentKey: String
+        get() = prefs.getString("enrollment_key", "") ?: ""
+        set(value) = prefs.edit().putString("enrollment_key", value).apply()
+
     var lastSyncTime: String?
         get() = prefs.getString("last_sync_time", null)
         set(value) = prefs.edit().putString("last_sync_time", value).apply()
@@ -90,7 +99,7 @@ class ServerClient(private val context: Context, private val db: AppDatabase) {
         }
     }
 
-    suspend fun ensureValidToken(client: HttpClient, defaultEnrollmentKey: String = "k7m2-x9qd-4hrt-wc3f-p8ze-n6ay"): String? {
+    suspend fun ensureValidToken(client: HttpClient): String? {
         val currentToken = accessToken
         if (!currentToken.isNullOrBlank()) {
             return currentToken
@@ -100,10 +109,15 @@ class ServerClient(private val context: Context, private val db: AppDatabase) {
                 return accessToken
             }
         }
+        // Re-enroll automatically only with the key the user actually entered for this device.
+        // There is no safe default enrollment key to fall back to — every real deployment sets
+        // its own (see README / init-secrets.sh) — so without one, the device just stays
+        // unpaired until the user enrolls it from Settings.
         val url = serverUrl.trim()
-        if (url.isNotBlank()) {
+        val key = enrollmentKey.trim()
+        if (url.isNotBlank() && key.isNotBlank()) {
             try {
-                val enrolled = enroll(url, defaultEnrollmentKey, android.os.Build.MODEL, client)
+                val enrolled = enroll(url, key, android.os.Build.MODEL, client)
                 return enrolled.accessToken
             } catch (_: Exception) {}
         }
@@ -127,6 +141,7 @@ class ServerClient(private val context: Context, private val db: AppDatabase) {
         }
         val data = resp.body<EnrollResponse>()
         serverUrl = finalUrl
+        this.enrollmentKey = enrollmentKey
         accessToken = data.accessToken
         refreshToken = data.refreshToken
         deviceId = data.deviceId

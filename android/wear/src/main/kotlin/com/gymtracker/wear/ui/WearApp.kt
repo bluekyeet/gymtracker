@@ -1864,7 +1864,8 @@ fun WatchSettingsScreen(
     onGenerateQr: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var urlText by remember { mutableStateOf(serverClient.serverUrl.ifBlank { "http://10.0.2.2:8081" }) }
+    var urlText by remember { mutableStateOf(serverClient.serverUrl) }
+    var keyText by remember { mutableStateOf(serverClient.enrollmentKey) }
     var saveStatus by remember { mutableStateOf<String?>(null) }
     var isChecking by remember { mutableStateOf(false) }
 
@@ -1896,24 +1897,48 @@ fun WatchSettingsScreen(
         }
 
         item {
+            Spacer(Modifier.height(2.dp))
+            Text("ENROLLMENT KEY", style = MaterialTheme.typography.caption2, color = MaterialTheme.colors.onSurfaceVariant)
+        }
+        item {
+            Spacer(Modifier.height(2.dp))
+            Chip(
+                onClick = {
+                    onLaunchKeyboard("Enrollment Key") { typed ->
+                        keyText = typed
+                    }
+                },
+                label = { Text(if (keyText.isBlank()) "⌨ Type Enrollment Key..." else keyText, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (keyText.isBlank()) MaterialTheme.colors.onSurfaceVariant else MaterialTheme.colors.primary) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.88f).padding(vertical = 2.dp)
+            )
+        }
+
+        item {
             Spacer(Modifier.height(4.dp))
             Button(
                 onClick = {
                     if (isChecking) return@Button
                     scope.launch {
                         isChecking = true
-                        saveStatus = "Verifying connection..."
+                        saveStatus = "Connecting..."
                         val trimmed = urlText.trim()
+                        val key = keyText.trim()
                         if (trimmed.isBlank()) {
                             saveStatus = "URL cannot be empty"
                             isChecking = false
                             return@launch
                         }
+                        if (key.isBlank()) {
+                            saveStatus = "Enrollment key cannot be empty"
+                            isChecking = false
+                            return@launch
+                        }
                         val cleanUrl = if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) "http://$trimmed" else trimmed
-                        serverClient.serverUrl = cleanUrl
                         try {
-                            val health = serverClient.checkHealth(cleanUrl, httpClient)
-                            saveStatus = "Connected! (Server status: ${health.status})"
+                            serverClient.checkHealth(cleanUrl, httpClient)
+                            serverClient.enroll(cleanUrl, key, android.os.Build.MODEL, httpClient)
+                            saveStatus = "Connected & enrolled!"
                         } catch (e: Exception) {
                             saveStatus = "Connection failed: ${e.localizedMessage ?: "Unreachable"}"
                         } finally {
@@ -1924,7 +1949,7 @@ fun WatchSettingsScreen(
                 enabled = !isChecking,
                 modifier = Modifier.fillMaxWidth(0.85f).height(36.dp)
             ) {
-                Text(if (isChecking) "Checking..." else "Save / Confirm URL", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(if (isChecking) "Checking..." else "Save & Enroll", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
 

@@ -47,8 +47,8 @@ fun SettingsScreen(nav: NavController) {
     val syncManager = remember { SyncManager(context, db) }
     val scope = rememberCoroutineScope()
 
-    var url by remember { mutableStateOf(serverClient.serverUrl.ifBlank { "http://10.0.2.2:8081" }) }
-    var key by remember { mutableStateOf("k7m2-x9qd-4hrt-wc3f-p8ze-n6ay") }
+    var url by remember { mutableStateOf(serverClient.serverUrl) }
+    var key by remember { mutableStateOf("") }
     var keyVisible by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var isConnected by remember { mutableStateOf(!serverClient.accessToken.isNullOrBlank()) }
@@ -121,6 +121,7 @@ fun SettingsScreen(nav: NavController) {
                                 try {
                                     val health = serverClient.checkHealth(url, client)
                                     statusMessage = "Health OK (Server ID: ${health.serverId.take(8)}...). Enrolling..."
+                                    serverClient.enrollmentKey = key
                                     serverClient.enroll(url, key, android.os.Build.MODEL, client)
                                     isConnected = true
                                     statusMessage = "Successfully connected and enrolled!"
