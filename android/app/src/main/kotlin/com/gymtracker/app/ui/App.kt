@@ -16,11 +16,16 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -31,6 +36,7 @@ import com.gymtracker.data.db.DatabaseProvider
 import com.gymtracker.data.repository.ExerciseRepository
 import com.gymtracker.data.repository.SplitRepository
 import com.gymtracker.data.repository.WorkoutRepository
+import com.gymtracker.data.sync.SyncScheduler
 
 @Composable
 fun App() {
@@ -42,6 +48,22 @@ fun App() {
     val nav = rememberNavController()
 
     LaunchedEffect(Unit) { exerciseRepo.seedBuiltinsIfNeeded() }
+    LaunchedEffect(Unit) {
+        SyncScheduler.schedulePeriodic(context)
+        SyncScheduler.syncNow(context)
+        // Phone only: sync the instant the internet comes back (chat-app style), not just every
+        // 15 minutes. The watch deliberately does not do this — battery matters more there.
+        SyncScheduler.watchForConnectivity(context)
+    }
+    // Sync every time the app is brought back to the foreground, not just on cold launch.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) SyncScheduler.syncNow(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val items = listOf(
         "today" to Icons.Filled.FitnessCenter,
         "splits" to Icons.Filled.List,
@@ -92,6 +114,10 @@ fun App() {
                 composable("workout/{sessionId}") { back ->
                     val id = back.arguments?.getString("sessionId") ?: return@composable
                     WorkoutScreen(nav, java.util.UUID.fromString(id), workoutRepo)
+                }
+                composable("workout_detail/{sessionId}") { back ->
+                    val id = back.arguments?.getString("sessionId") ?: return@composable
+                    WorkoutDetailScreen(nav, java.util.UUID.fromString(id), workoutRepo)
                 }
                 composable("exercise/{exerciseId}") { back ->
                     val id = back.arguments?.getString("exerciseId") ?: return@composable
