@@ -38,7 +38,6 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.launch
-import java.util.UUID
 
 @Composable
 fun SettingsScreen(nav: NavController) {
