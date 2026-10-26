@@ -30,44 +30,65 @@ class SyncManager(private val context: Context, private val db: AppDatabase) {
     private val json = Json { ignoreUnknownKeys = true }
     private val prefs = context.getSharedPreferences("sync", Context.MODE_PRIVATE)
 
+    companion object {
+        private const val PUSH_CHUNK_SIZE = 200
+    }
+
     fun getCursor(): String = prefs.getString("cursor", "0") ?: "0"
     fun setCursor(value: String) = prefs.edit().putString("cursor", value).apply()
 
+    // Backfill scans every row in the local DB to catch pre-outbox data. It only needs to run
+    // once ever per install — repositories queue new writes to the outbox themselves. Running it
+    // on every sync made push time grow with total history size instead of just pending changes.
+    private fun isBackfillDone(): Boolean = prefs.getBoolean("backfill_done", false)
+    private fun setBackfillDone() = prefs.edit().putBoolean("backfill_done", true).apply()
+
     suspend fun pushPending(baseUrl: String, token: String, deviceId: UUID, schemaVersion: Int, client: HttpClient) = withContext(Dispatchers.IO) {
-        com.gymtracker.data.repository.SplitRepository(db).backfillExistingSplitsToOutbox()
-        com.gymtracker.data.repository.WorkoutRepository(db).backfillExistingWorkoutsToOutbox()
+        if (!isBackfillDone()) {
+            com.gymtracker.data.repository.SplitRepository(db).backfillExistingSplitsToOutbox()
+            com.gymtracker.data.repository.WorkoutRepository(db).backfillExistingWorkoutsToOutbox()
+            setBackfillDone()
+        }
         val outbox = db.outboxDao().getAll()
         if (outbox.isEmpty()) return@withContext
         val entityOrder = mapOf("exercise" to 1, "split" to 2, "split_day" to 3, "split_day_exercise" to 4, "workout_session" to 5, "workout_exercise" to 6, "set" to 7)
         val sortedOutbox = outbox.sortedBy { entityOrder[it.entity] ?: 5 }
-        val ops = sortedOutbox.map { o ->
-            SyncOperation(
-                opId = o.opId.toString(),
-                entity = o.entity,
-                entityId = o.entityId.toString(),
-                type = o.type,
-                baseRevision = o.baseRevision,
-                data = o.dataJson?.let { json.parseToJsonElement(it) }
-            )
-        }
-        val req = SyncPushRequest(deviceId.toString(), schemaVersion, ops)
-        val response = client.post("$baseUrl/v1/sync/push") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(req)
-        }
-        if (response.status == HttpStatusCode.Unauthorized) {
-            throw SyncAuthException("Unauthorized")
-        }
-        if (!response.status.isSuccess()) {
-            throw Exception("Push failed: ${response.status.value}")
-        }
-        val resp = response.body<SyncPushResponse>()
-        resp.results.forEach { r ->
-            val id = UUID.fromString(r.opId)
-            when (r.status) {
-                "applied", "rejected" -> db.outboxDao().delete(id)
-                "retry" -> { /* leave for retry */ }
+
+        // Push in chunks instead of one request for the whole outbox. A single giant request
+        // (e.g. thousands of pending ops after being offline) is slow to build, slow to send on a
+        // weak radio (the watch), and all-or-nothing if it times out. Chunking makes a huge
+        // backlog resumable and lets progress show up incrementally; each op is still idempotent
+        // by opId so re-pushing a chunk that partially succeeded is always safe.
+        for (chunk in sortedOutbox.chunked(PUSH_CHUNK_SIZE)) {
+            val ops = chunk.map { o ->
+                SyncOperation(
+                    opId = o.opId.toString(),
+                    entity = o.entity,
+                    entityId = o.entityId.toString(),
+                    type = o.type,
+                    baseRevision = o.baseRevision,
+                    data = o.dataJson?.let { json.parseToJsonElement(it) }
+                )
+            }
+            val req = SyncPushRequest(deviceId.toString(), schemaVersion, ops)
+            val response = client.post("$baseUrl/v1/sync/push") {
+                bearerAuth(token)
+                contentType(ContentType.Application.Json)
+                setBody(req)
+            }
+            if (response.status == HttpStatusCode.Unauthorized) {
+                throw SyncAuthException("Unauthorized")
+            }
+            if (!response.status.isSuccess()) {
+                throw Exception("Push failed: ${response.status.value}")
+            }
+            val resp = response.body<SyncPushResponse>()
+            resp.results.forEach { r ->
+                val id = UUID.fromString(r.opId)
+                when (r.status) {
+                    "applied", "rejected" -> db.outboxDao().delete(id)
+                    "retry" -> { /* leave for retry */ }
+                }
             }
         }
     }
@@ -79,7 +100,10 @@ class SyncManager(private val context: Context, private val db: AppDatabase) {
             val response = client.get("$baseUrl/v1/sync/pull") {
                 bearerAuth(token)
                 parameter("cursor", cursor)
-                parameter("limit", 100)
+                // 500 per page instead of 100: now that the server batches its row lookups per
+                // page (see SyncService.fetchEntityDataBulk), a bigger page means fewer HTTP round
+                // trips to catch up on a large backlog — the main cost on a weak radio like the watch.
+                parameter("limit", 500)
             }
             if (response.status == HttpStatusCode.Unauthorized) {
                 throw SyncAuthException("Unauthorized")
