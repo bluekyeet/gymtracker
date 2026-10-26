@@ -375,6 +375,12 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                                 }
                             }
                         },
+                        onDeleteSet = { setId ->
+                            scope.launch {
+                                workoutRepo.softDeleteSet(setId)
+                                currentSets = workoutRepo.observeSets(currentExercise.id).first()
+                            }
+                        },
                         onAddExercise = {
                             pickMode = "add"
                             navigateTo("pick_exercise")
@@ -1952,6 +1958,7 @@ fun WorkoutLoggingScreen(
     onPrevExercise: () -> Unit,
     onNextExercise: () -> Unit,
     onAddSet: () -> Unit,
+    onDeleteSet: (UUID) -> Unit,
     onAddExercise: () -> Unit,
     onRemoveExercise: () -> Unit,
     onFinishWorkout: () -> Unit
@@ -1989,14 +1996,6 @@ fun WorkoutLoggingScreen(
                 "Exercise ${exerciseIndex + 1} of $totalExercises",
                 style = MaterialTheme.typography.caption2,
                 color = MaterialTheme.colors.onSurfaceVariant
-            )
-        }
-
-        item {
-            Text(
-                "Logged Sets: ${sets.size}",
-                style = MaterialTheme.typography.body2,
-                color = MaterialTheme.colors.primary
             )
         }
 
@@ -2056,7 +2055,25 @@ fun WorkoutLoggingScreen(
             }
         }
 
-        // Exercise navigation arrows — below the LOG SET button
+        item {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Logged Sets: ${sets.size}",
+                style = MaterialTheme.typography.body2,
+                color = MaterialTheme.colors.primary
+            )
+        }
+
+        items(sets.size) { idx ->
+            val s = sets[idx]
+            Spacer(Modifier.height(2.dp))
+            CompactChip(
+                onClick = { onDeleteSet(s.id) },
+                label = { Text("Set ${s.setNumber}: ${s.weightKg}kg × ${s.reps} (✕)", fontSize = 10.sp) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.85f)
+            )
+        }
         item {
             Spacer(Modifier.height(2.dp))
             Row(
