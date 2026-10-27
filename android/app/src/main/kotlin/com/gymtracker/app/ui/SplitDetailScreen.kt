@@ -160,13 +160,15 @@ fun SplitDetailScreen(nav: NavController, splitRepo: SplitRepository, splitId: U
                 Button(
                     enabled = newDayName.isNotBlank(),
                     onClick = {
+                        val name = newDayName.trim()
+                        val weekdays = selectedWeekdays.toList().sorted()
                         scope.launch {
                             splitRepo.saveDay(
                                 SplitDay(
                                     id = UUID.randomUUID(),
                                     splitId = splitId,
-                                    name = newDayName.trim(),
-                                    weekdays = selectedWeekdays.toList().sorted(),
+                                    name = name,
+                                    weekdays = weekdays,
                                     sortKey = days.size.toDouble()
                                 )
                             )

@@ -122,6 +122,7 @@ class SyncService {
                         it[Exercises.userId] = m.userId ?: userId
                         it[name] = m.name
                         it[muscleGroup] = m.muscleGroup?.name
+                        it[customGroup] = m.customGroup
                         it[equipment] = m.equipment?.name
                         it[isCustom] = m.isCustom
                         it[revision] = newRev
@@ -132,6 +133,7 @@ class SyncService {
                     Exercises.update({ Exercises.id eq UUID.fromString(op.entityId) }) {
                         it[name] = m.name
                         it[muscleGroup] = m.muscleGroup?.name
+                        it[customGroup] = m.customGroup
                         it[equipment] = m.equipment?.name
                         it[isCustom] = m.isCustom
                         it[revision] = newRev
@@ -465,6 +467,7 @@ class SyncService {
                     userId = row[Exercises.userId],
                     name = row[Exercises.name],
                     muscleGroup = row[Exercises.muscleGroup]?.let { MuscleGroup.valueOf(it) },
+                    customGroup = row[Exercises.customGroup],
                     equipment = row[Exercises.equipment]?.let { Equipment.valueOf(it) },
                     isCustom = row[Exercises.isCustom],
                     revision = row[Exercises.revision],

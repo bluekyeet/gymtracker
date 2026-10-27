@@ -1,6 +1,7 @@
 package com.gymtracker.app.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -79,7 +80,13 @@ fun WorkoutDetailScreen(nav: NavController, sessionId: UUID, workoutRepo: Workou
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 exercises.forEach { ex ->
-                    ReadOnlyExerciseCard(ex, setsByExercise[ex.id].orEmpty())
+                    ReadOnlyExerciseCard(
+                        exercise = ex,
+                        sets = setsByExercise[ex.id].orEmpty(),
+                        onClick = ex.exerciseId?.let { exerciseId ->
+                            { nav.navigate("exercise/$exerciseId") }
+                        }
+                    )
                 }
                 Spacer(Modifier.height(16.dp))
             }
@@ -109,14 +116,29 @@ fun WorkoutDetailScreen(nav: NavController, sessionId: UUID, workoutRepo: Workou
 }
 
 @Composable
-private fun ReadOnlyExerciseCard(exercise: WorkoutExercise, sets: List<SetEntry>) {
-    Card(Modifier.fillMaxWidth()) {
+private fun ReadOnlyExerciseCard(
+    exercise: WorkoutExercise,
+    sets: List<SetEntry>,
+    onClick: (() -> Unit)?
+) {
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+    ) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 exercise.exerciseName,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
+            if (onClick != null) {
+                Text(
+                    "View progress",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
             Spacer(Modifier.height(8.dp))
             if (sets.isEmpty()) {
                 Text(

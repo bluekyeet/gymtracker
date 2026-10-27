@@ -8,6 +8,7 @@ object Exercises : Table("exercises") {
     val userId = uuid("user_id").nullable()
     val name = text("name")
     val muscleGroup = text("muscle_group").nullable()
+    val customGroup = text("custom_group").nullable()
     val equipment = text("equipment").nullable()
     val isCustom = bool("is_custom").default(false)
     val revision = long("revision").default(0)
