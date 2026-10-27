@@ -292,11 +292,12 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                 onResumeWorkout = {
                     navigateTo("workout")
                 },
-                onStartWorkout = { dayName, exercises ->
+                onStartWorkout = { dayId, dayName, exercises ->
                     scope.launch {
                         val session = WorkoutSession(
                             id = UUID.randomUUID(),
                             userId = UUID.randomUUID(),
+                            splitDayId = dayId,
                             dayName = dayName,
                             startedAt = Instant.now()
                         )
@@ -803,7 +804,7 @@ fun HomeScreen(
     lastSyncTime: String?,
     onSync: () -> Unit,
     onResumeWorkout: () -> Unit,
-    onStartWorkout: (String, List<Exercise>) -> Unit,
+    onStartWorkout: (UUID?, String, List<Exercise>) -> Unit,
     onOpenEditSplits: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenSettings: () -> Unit
@@ -873,9 +874,9 @@ fun HomeScreen(
                     if (activeSession != null) {
                         onResumeWorkout()
                     } else if (todayScheduledDay != null) {
-                        onStartWorkout(todayScheduledDay.name, todayDayExercises.ifEmpty { allExercises.take(3) })
+                        onStartWorkout(todayScheduledDay.id, todayScheduledDay.name, todayDayExercises.ifEmpty { allExercises.take(3) })
                     } else {
-                        onStartWorkout("Quick Workout", allExercises.take(3))
+                        onStartWorkout(null, "Quick Workout", allExercises.take(3))
                     }
                 },
                 modifier = Modifier.fillMaxWidth(0.92f)
@@ -931,9 +932,9 @@ fun HomeScreen(
                             if (activeSession != null) {
                                 onResumeWorkout()
                             } else if (todayScheduledDay != null) {
-                                onStartWorkout(todayScheduledDay.name, todayDayExercises.ifEmpty { allExercises.take(3) })
+                                onStartWorkout(todayScheduledDay.id, todayScheduledDay.name, todayDayExercises.ifEmpty { allExercises.take(3) })
                             } else {
-                                onStartWorkout("Quick Workout", allExercises.take(3))
+                                onStartWorkout(null, "Quick Workout", allExercises.take(3))
                             }
                         },
                         modifier = Modifier.fillMaxWidth().height(40.dp),
@@ -2245,12 +2246,11 @@ fun WorkoutLoggingScreen(
 
         items(sets.size) { idx ->
             val s = sets[idx]
-            Spacer(Modifier.height(2.dp))
             CompactChip(
                 onClick = { onDeleteSet(s.id) },
                 label = { Text("Set ${s.setNumber}: ${s.weightKg}kg × ${s.reps} (✕)", fontSize = 10.sp) },
                 colors = ChipDefaults.secondaryChipColors(),
-                modifier = Modifier.fillMaxWidth(0.85f)
+                modifier = Modifier.fillMaxWidth(0.85f).height(32.dp)
             )
         }
         item {

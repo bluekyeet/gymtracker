@@ -25,6 +25,14 @@ docker compose -f infra/compose.yaml up -d postgres
 ./gradlew -p android :data:testDebugUnitTest :app:assembleDebug :wear:assembleDebug
 ```
 
+Optimized release APKs use R8 code shrinking and resource shrinking:
+
+```text
+./gradlew -p android :app:assembleRelease :wear:assembleRelease
+```
+
+Until a release signing configuration is provided, these are emitted as unsigned APKs and cannot be installed directly.
+
 ## web
 
 ```text
