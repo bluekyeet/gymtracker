@@ -13,6 +13,14 @@ import android.os.VibratorManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -280,7 +288,16 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
         timeText = { TimeText() },
         vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) }
     ) {
-        when (currentScreen) {
+        AnimatedContent(
+            targetState = currentScreen,
+            transitionSpec = {
+                (fadeIn(tween(180)) + scaleIn(tween(220), initialScale = 0.92f))
+                    .togetherWith(fadeOut(tween(120)) + scaleOut(tween(140), targetScale = 1.04f))
+                    .using(SizeTransform(clip = false))
+            },
+            label = "wear screen transition"
+        ) { animatedScreen ->
+        when (animatedScreen) {
             "home" -> HomeScreen(
                 activeSession = activeSession,
                 splitRepo = splitRepo,
@@ -790,6 +807,7 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
             "qr_pairing" -> QrPairingScreen(
                 serverClient = serverClient
             )
+        }
         }
     }
 }

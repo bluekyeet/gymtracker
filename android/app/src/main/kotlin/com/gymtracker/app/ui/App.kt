@@ -1,5 +1,11 @@
 package com.gymtracker.app.ui
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -22,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
@@ -78,10 +85,25 @@ fun App() {
                 val navBackStackEntry by nav.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
                 items.forEach { (route, icon) ->
+                    val selected = currentDestination?.hierarchy?.any { it.route == route } == true
+                    val iconScale by animateFloatAsState(
+                        targetValue = if (selected) 1.18f else 1f,
+                        animationSpec = spring(dampingRatio = 0.65f, stiffness = 500f),
+                        label = "navigation icon scale"
+                    )
                     NavigationBarItem(
-                        icon = { Icon(icon, contentDescription = route) },
+                        icon = {
+                            Icon(
+                                icon,
+                                contentDescription = route,
+                                modifier = Modifier.graphicsLayer {
+                                    scaleX = iconScale
+                                    scaleY = iconScale
+                                }
+                            )
+                        },
                         label = { Text(route.replaceFirstChar { it.uppercase() }) },
-                        selected = currentDestination?.hierarchy?.any { it.route == route } == true,
+                        selected = selected,
                         onClick = {
                             nav.navigate(route) {
                                 popUpTo(nav.graph.findStartDestination().id) { saveState = true }
@@ -95,7 +117,24 @@ fun App() {
         }
     ) { paddingValues ->
         Box(Modifier.fillMaxSize().padding(paddingValues)) {
-            NavHost(navController = nav, startDestination = "today") {
+            NavHost(
+                navController = nav,
+                startDestination = "today",
+                enterTransition = {
+                    fadeIn(tween(220)) + slideIntoContainer(
+                        AnimatedContentTransitionScope.SlideDirection.Start,
+                        tween(280)
+                    )
+                },
+                exitTransition = { fadeOut(tween(140)) },
+                popEnterTransition = {
+                    fadeIn(tween(220)) + slideIntoContainer(
+                        AnimatedContentTransitionScope.SlideDirection.End,
+                        tween(280)
+                    )
+                },
+                popExitTransition = { fadeOut(tween(140)) }
+            ) {
                 composable("today") { TodayScreen(nav, splitRepo, workoutRepo, exerciseRepo) }
                 composable("splits") { SplitsScreen(nav, splitRepo, exerciseRepo) }
                 composable("exercises") { ExercisesScreen(nav, exerciseRepo) }
