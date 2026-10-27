@@ -31,7 +31,7 @@ Optimized release APKs use R8 code shrinking and resource shrinking:
 ./gradlew -p android :app:assembleRelease :wear:assembleRelease
 ```
 
-Until a release signing configuration is provided, these are emitted as unsigned APKs and cannot be installed directly.
+These sideload-only release builds use the standard Android debug signing key so they can be installed directly. They are R8-optimized but are not suitable for Play Store distribution. Replace the signing configuration with a protected release keystore if formal distribution is ever needed.
 
 ## web
 
