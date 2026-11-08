@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.gymtracker.data.OwnerId
 import com.gymtracker.data.repository.ExerciseRepository
 import com.gymtracker.data.repository.SplitRepository
 import com.gymtracker.shared.domain.Split
@@ -245,7 +246,7 @@ fun SplitsScreen(nav: NavController, splitRepo: SplitRepository, exerciseRepo: E
                             val isFirst = splits.isEmpty()
                             val split = Split(
                                 id = UUID.randomUUID(),
-                                userId = UUID.randomUUID(),
+                                userId = OwnerId.current,
                                 name = splitName,
                                 isActive = isFirst
                             )

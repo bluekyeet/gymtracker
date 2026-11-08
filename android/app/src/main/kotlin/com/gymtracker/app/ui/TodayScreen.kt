@@ -3,6 +3,8 @@ package com.gymtracker.app.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -69,18 +71,26 @@ fun TodayScreen(
             .verticalScroll(rememberScrollState())
     ) {
         // Top Date & Active Split Header
-        Text(
-            text = formattedDate.uppercase(),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.secondary
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = activeSplit?.name?.uppercase() ?: "NO ACTIVE SPLIT",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = formattedDate.uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = activeSplit?.name?.uppercase() ?: "NO ACTIVE SPLIT",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            // Settings is a sub-screen, not a sixth tab: six labels do not fit a phone-width bar.
+            IconButton(onClick = { nav.navigate("settings") }) {
+                Icon(Icons.Filled.Settings, contentDescription = "Server and sync settings")
+            }
+        }
 
         Spacer(Modifier.height(12.dp))
 
@@ -298,48 +308,11 @@ fun TodayScreen(
 
 private suspend fun startWorkout(
     day: SplitDay,
-    splitRepo: SplitRepository,
+    @Suppress("UNUSED_PARAMETER") splitRepo: SplitRepository,
     workoutRepo: WorkoutRepository,
-    exerciseRepo: ExerciseRepository,
+    @Suppress("UNUSED_PARAMETER") exerciseRepo: ExerciseRepository,
     nav: NavController
 ) {
-    val session = WorkoutSession(
-        id = UUID.randomUUID(),
-        userId = UUID.randomUUID(),
-        splitDayId = day.id,
-        dayName = day.name,
-        startedAt = java.time.Instant.now()
-    )
-    workoutRepo.saveSession(session)
-    val splitExercises = splitRepo.observeDayExercises(day.id).first()
-    splitExercises.forEach { se ->
-        val ex = se.exerciseId?.let { exerciseRepo.getById(it) }
-        val workoutExerciseId = UUID.randomUUID()
-        workoutRepo.saveExercise(
-            WorkoutExercise(
-                id = workoutExerciseId,
-                sessionId = session.id,
-                exerciseId = se.exerciseId,
-                exerciseName = ex?.name ?: "Exercise",
-                sortKey = se.sortKey
-            )
-        )
-        // Pre-fill the recommended sets so the workout opens ready to log.
-        val targetSets = se.targetSets
-        if (targetSets != null && targetSets in 1..50) {
-            repeat(targetSets) { index ->
-                workoutRepo.saveSet(
-                    SetEntry(
-                        id = UUID.randomUUID(),
-                        workoutExerciseId = workoutExerciseId,
-                        setNumber = index + 1,
-                        weightKg = 0.0,
-                        reps = se.targetReps ?: 0,
-                        setType = SetType.WORKING
-                    )
-                )
-            }
-        }
-    }
+    val session = workoutRepo.startWorkout(day)
     nav.navigate("workout/${session.id}")
 }

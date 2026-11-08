@@ -2,12 +2,12 @@ package com.gymtracker.data.repository
 
 import androidx.room.withTransaction
 import com.gymtracker.data.db.AppDatabase
+import com.gymtracker.data.db.put
 import com.gymtracker.data.db.toDomain
 import com.gymtracker.data.db.toEntity
 import com.gymtracker.shared.domain.Exercise
 import com.gymtracker.shared.domain.MuscleGroup
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -22,7 +22,7 @@ class ExerciseRepository(private val db: AppDatabase) {
         val entity = exercise.toEntity()
         db.withTransaction {
             db.exerciseDao().upsert(entity)
-            db.outboxDao().insert(
+            db.outboxDao().put(
                 com.gymtracker.data.db.OutboxEntity(
                     opId = UUID.randomUUID(),
                     entity = "exercise",
@@ -35,17 +35,24 @@ class ExerciseRepository(private val db: AppDatabase) {
         }
     }
 
-    /** Seeds the built-in exercise library the first time the app runs. */
+    /**
+     * Seeds the built-in exercises that are missing.
+     *
+     * Ids are derived from the name, so the phone and the watch seed the *same* rows and sync
+     * merges them instead of listing "Bench Press" twice. A built-in is looked up by name,
+     * deleted rows included, so deleting one (or all of them) never brings it back on the next launch.
+     */
     suspend fun seedBuiltinsIfNeeded() {
-        if (db.exerciseDao().getAll().first().isNotEmpty()) return
-        builtinExercises().forEach { save(it) }
+        builtinExercises().forEach { builtin ->
+            if (db.exerciseDao().countBuiltinNamed(builtin.name) == 0) save(builtin)
+        }
     }
 
     suspend fun softDelete(id: UUID) {
         val now = java.time.Instant.now()
         db.withTransaction {
             db.exerciseDao().softDelete(id, now, now)
-            db.outboxDao().insert(
+            db.outboxDao().put(
                 com.gymtracker.data.db.OutboxEntity(
                     opId = UUID.randomUUID(),
                     entity = "exercise",
@@ -58,11 +65,18 @@ class ExerciseRepository(private val db: AppDatabase) {
         }
     }
 
+    private fun builtin(name: String, group: MuscleGroup) = Exercise(
+        id = UUID.nameUUIDFromBytes("powertrack:builtin:$name".toByteArray()),
+        name = name,
+        muscleGroup = group,
+        isCustom = false
+    )
+
     private fun builtinExercises() = listOf(
-        Exercise(id = UUID.randomUUID(), name = "Bench Press", muscleGroup = MuscleGroup.CHEST, isCustom = false),
-        Exercise(id = UUID.randomUUID(), name = "Squat", muscleGroup = MuscleGroup.LEGS, isCustom = false),
-        Exercise(id = UUID.randomUUID(), name = "Deadlift", muscleGroup = MuscleGroup.BACK, isCustom = false),
-        Exercise(id = UUID.randomUUID(), name = "Overhead Press", muscleGroup = MuscleGroup.SHOULDERS, isCustom = false),
-        Exercise(id = UUID.randomUUID(), name = "Barbell Row", muscleGroup = MuscleGroup.BACK, isCustom = false)
+        builtin("Bench Press", MuscleGroup.CHEST),
+        builtin("Squat", MuscleGroup.LEGS),
+        builtin("Deadlift", MuscleGroup.BACK),
+        builtin("Overhead Press", MuscleGroup.SHOULDERS),
+        builtin("Barbell Row", MuscleGroup.BACK)
     )
 }

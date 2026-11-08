@@ -25,8 +25,11 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
         return try {
             when (syncManager.performFullSync(serverClient, client)) {
                 is SyncResult.Success -> Result.success()
+                // Offline or server down: try again with backoff.
                 is SyncResult.NetworkError -> Result.retry()
-                else -> Result.retry()
+                // Not paired / session revoked / misconfigured: retrying cannot fix it, and the
+                // next foreground or connectivity trigger starts a fresh attempt anyway.
+                is SyncResult.AuthError, is SyncResult.OtherError -> Result.success()
             }
         } catch (_: Exception) {
             Result.retry()

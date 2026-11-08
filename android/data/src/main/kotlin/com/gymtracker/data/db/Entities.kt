@@ -1,6 +1,7 @@
 package com.gymtracker.data.db
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.gymtracker.shared.domain.Equipment
 import com.gymtracker.shared.domain.MuscleGroup
@@ -35,7 +36,7 @@ data class SplitEntity(
     val deletedAt: Instant? = null
 )
 
-@Entity(tableName = "split_days", foreignKeys = [androidx.room.ForeignKey(entity = SplitEntity::class, parentColumns = ["id"], childColumns = ["splitId"], onDelete = androidx.room.ForeignKey.CASCADE)])
+@Entity(tableName = "split_days", foreignKeys = [androidx.room.ForeignKey(entity = SplitEntity::class, parentColumns = ["id"], childColumns = ["splitId"], onDelete = androidx.room.ForeignKey.CASCADE)], indices = [Index("splitId")])
 data class SplitDayEntity(
     @PrimaryKey val id: UUID,
     val splitId: UUID,
@@ -48,7 +49,7 @@ data class SplitDayEntity(
     val deletedAt: Instant? = null
 )
 
-@Entity(tableName = "split_day_exercises", foreignKeys = [androidx.room.ForeignKey(entity = SplitDayEntity::class, parentColumns = ["id"], childColumns = ["splitDayId"], onDelete = androidx.room.ForeignKey.CASCADE)])
+@Entity(tableName = "split_day_exercises", foreignKeys = [androidx.room.ForeignKey(entity = SplitDayEntity::class, parentColumns = ["id"], childColumns = ["splitDayId"], onDelete = androidx.room.ForeignKey.CASCADE)], indices = [Index("splitDayId")])
 data class SplitDayExerciseEntity(
     @PrimaryKey val id: UUID,
     val splitDayId: UUID,
@@ -62,7 +63,7 @@ data class SplitDayExerciseEntity(
     val deletedAt: Instant? = null
 )
 
-@Entity(tableName = "workout_sessions")
+@Entity(tableName = "workout_sessions", indices = [Index("startedAt")])
 data class WorkoutSessionEntity(
     @PrimaryKey val id: UUID,
     val userId: UUID,
@@ -77,7 +78,7 @@ data class WorkoutSessionEntity(
     val deletedAt: Instant? = null
 )
 
-@Entity(tableName = "workout_exercises", foreignKeys = [androidx.room.ForeignKey(entity = WorkoutSessionEntity::class, parentColumns = ["id"], childColumns = ["sessionId"], onDelete = androidx.room.ForeignKey.CASCADE)])
+@Entity(tableName = "workout_exercises", foreignKeys = [androidx.room.ForeignKey(entity = WorkoutSessionEntity::class, parentColumns = ["id"], childColumns = ["sessionId"], onDelete = androidx.room.ForeignKey.CASCADE)], indices = [Index("sessionId"), Index("exerciseId")])
 data class WorkoutExerciseEntity(
     @PrimaryKey val id: UUID,
     val sessionId: UUID,
@@ -90,7 +91,7 @@ data class WorkoutExerciseEntity(
     val deletedAt: Instant? = null
 )
 
-@Entity(tableName = "sets", foreignKeys = [androidx.room.ForeignKey(entity = WorkoutExerciseEntity::class, parentColumns = ["id"], childColumns = ["workoutExerciseId"], onDelete = androidx.room.ForeignKey.CASCADE)])
+@Entity(tableName = "sets", foreignKeys = [androidx.room.ForeignKey(entity = WorkoutExerciseEntity::class, parentColumns = ["id"], childColumns = ["workoutExerciseId"], onDelete = androidx.room.ForeignKey.CASCADE)], indices = [Index("workoutExerciseId")])
 data class SetEntity(
     @PrimaryKey val id: UUID,
     val workoutExerciseId: UUID,

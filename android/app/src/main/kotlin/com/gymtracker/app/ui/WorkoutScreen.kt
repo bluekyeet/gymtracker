@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -26,10 +27,17 @@ import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
+import com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState
+import com.patrykandpatrick.vico.core.cartesian.Zoom
 import com.patrykandpatrick.vico.core.cartesian.data.AxisValueOverrider
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.ZoneId
@@ -266,22 +274,19 @@ private fun LastSessionCard(
             val points = history
                 .filter { (it.topSet?.weightKg ?: 0.0) > 0.0 }
                 .takeLast(8)
-            if (points.size < 2) {
+            val daily = ChartTime.bestPerDay(points.map { it.session.startedAt to (it.topSet?.weightKg ?: 0.0) })
+            if (daily.size < 2) {
                 Text(
                     "Log this exercise in 2 or more workouts to see the trend.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                val modelProducer = remember(points) { CartesianChartModelProducer() }
-                LaunchedEffect(points) {
+                val modelProducer = remember(daily) { CartesianChartModelProducer() }
+                LaunchedEffect(daily) {
                     modelProducer.runTransaction {
-                        lineSeries { series(points.map { it.topSet?.weightKg ?: 0.0 }) }
+                        lineSeries { series(daily.map { it.first }, daily.map { it.second }) }
                     }
-                }
-                val labels = points.map { shortDate.format(it.session.startedAt) }
-                val xAxisFormatter = CartesianValueFormatter { value, _, _ ->
-                    labels.getOrNull(value.roundToInt()) ?: ""
                 }
                 val yValues = points.mapNotNull { it.topSet?.weightKg }
                 val yMin = yValues.minOrNull() ?: 0.0
@@ -298,16 +303,25 @@ private fun LastSessionCard(
                     chart = rememberCartesianChart(
                         rememberLineCartesianLayer(
                             axisValueOverrider = AxisValueOverrider.fixed(
-                                minX = null,
-                                maxX = null,
+                                minX = ChartTime.paddedRange(daily.map { it.first }).first,
+                                maxX = ChartTime.paddedRange(daily.map { it.first }).second,
                                 minY = yMin - padding,
                                 maxY = yMax + padding
                             )
                         ),
                         startAxis = rememberStartAxis(),
-                        bottomAxis = rememberBottomAxis(valueFormatter = xAxisFormatter)
+                        bottomAxis = rememberBottomAxis(
+                            valueFormatter = ChartTime.axisFormatter,
+                                guideline = null, // one line per day is just noise
+                                tick = null,
+                            itemPlacer = remember(daily) { ChartTime.labelPlacer(daily.map { it.first }) }
+                        )
                     ),
                     modelProducer = modelProducer,
+                        // Fit every point on screen. Left alone, a time axis is wider than the display and
+                        // the chart turns into a sideways-scrolling strip showing only its first days.
+                        scrollState = rememberVicoScrollState(scrollEnabled = false),
+                        zoomState = rememberVicoZoomState(zoomEnabled = false, initialZoom = Zoom.Content),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(160.dp)
@@ -371,12 +385,29 @@ private fun SetRow(
     var weightText by remember(set.id) { mutableStateOf(formatNumber(set.weightKg)) }
     var repsText by remember(set.id) { mutableStateOf(set.reps.toString()) }
 
-    fun commit() {
-        val weight = weightText.toDoubleOrNull()
-        val reps = repsText.toIntOrNull()
-        if (weight == null || !Validation.isValidWeightKg(weight)) return
-        if (reps == null || !Validation.isValidReps(reps)) return
-        scope.launch { workoutRepo.saveSet(set.copy(weightKg = weight, reps = reps)) }
+    // Every keystroke used to write the row and queue a sync op ("102.5" = five of each). Edits are
+    // now saved once the user pauses, when the field loses focus, or when the row leaves the screen.
+    val currentSet by rememberUpdatedState(set)
+    val currentWeight by rememberUpdatedState(weightText)
+    val currentReps by rememberUpdatedState(repsText)
+    val removed = remember(set.id) { booleanArrayOf(false) }
+
+    /** The set with the typed values applied, or null if nothing valid and new has been typed. */
+    fun pendingEdit(): SetEntry? {
+        if (removed[0]) return null
+        val weight = currentWeight.toDoubleOrNull() ?: return null
+        val reps = currentReps.toIntOrNull() ?: return null
+        if (!Validation.isValidWeightKg(weight) || !Validation.isValidReps(reps)) return null
+        if (weight == currentSet.weightKg && reps == currentSet.reps) return null
+        return currentSet.copy(weightKg = weight, reps = reps)
+    }
+
+    LaunchedEffect(weightText, repsText) {
+        delay(SET_EDIT_DEBOUNCE_MS)
+        pendingEdit()?.let { workoutRepo.saveSet(it) }
+    }
+    DisposableEffect(set.id) {
+        onDispose { pendingEdit()?.let { edit -> flushScope.launch { workoutRepo.saveSet(edit) } } }
     }
 
     val weightInvalid = weightText.isNotBlank() &&
@@ -398,37 +429,37 @@ private fun SetRow(
         )
         OutlinedTextField(
             value = weightText,
-            onValueChange = {
-                weightText = it
-                commit()
-            },
+            onValueChange = { weightText = it },
             label = { Text("kg") },
             isError = weightInvalid,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             singleLine = true,
-            modifier = Modifier.width(96.dp)
+            modifier = Modifier.width(96.dp).onFocusChanged { if (!it.isFocused) pendingEdit()?.let { e -> scope.launch { workoutRepo.saveSet(e) } } }
         )
         Spacer(Modifier.width(8.dp))
         OutlinedTextField(
             value = repsText,
-            onValueChange = {
-                repsText = it
-                commit()
-            },
+            onValueChange = { repsText = it },
             label = { Text("reps") },
             isError = repsInvalid,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
-            modifier = Modifier.width(96.dp)
+            modifier = Modifier.width(96.dp).onFocusChanged { if (!it.isFocused) pendingEdit()?.let { e -> scope.launch { workoutRepo.saveSet(e) } } }
         )
         Spacer(Modifier.weight(1f))
         IconButton(onClick = {
+            removed[0] = true // a pending edit must not resurrect the row after it is deleted
             scope.launch { workoutRepo.softDeleteSet(set.id) }
         }) {
             Icon(Icons.Filled.Delete, contentDescription = "Delete set ${set.setNumber}")
         }
     }
 }
+
+private const val SET_EDIT_DEBOUNCE_MS = 400L
+
+/** Outlives the screen so an edit made just before leaving it is still saved. */
+private val flushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 private fun formatNumber(value: Double): String =
     if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()

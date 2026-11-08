@@ -45,4 +45,6 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("org.robolectric:robolectric:4.12.2")
     testImplementation("androidx.test:core-ktx:1.6.1")
+    // Fake server for push/pull/auth tests (DESIGN.md requires fake-server sync tests); test-only.
+    testImplementation("io.ktor:ktor-client-mock:3.0.3")
 }

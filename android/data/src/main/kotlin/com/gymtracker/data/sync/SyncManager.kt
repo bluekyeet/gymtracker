@@ -12,6 +12,8 @@ import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.http.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
@@ -32,6 +34,16 @@ class SyncManager(private val context: Context, private val db: AppDatabase) {
 
     companion object {
         private const val PUSH_CHUNK_SIZE = 200
+
+        /**
+         * One sync at a time per process. The periodic worker, the foreground one-off worker, the
+         * connectivity trigger and the Settings button all call [performFullSync]; without this they
+         * run concurrently, push the same outbox twice and race to rotate the same refresh token
+         * (which the server reads as token theft).
+         */
+        private val syncLock = Mutex()
+
+        private val syncTimeFormat = java.time.format.DateTimeFormatter.ofPattern("d MMM HH:mm", java.util.Locale.getDefault())
     }
 
     fun getCursor(): String = prefs.getString("cursor", "0") ?: "0"
@@ -42,6 +54,22 @@ class SyncManager(private val context: Context, private val db: AppDatabase) {
     // on every sync made push time grow with total history size instead of just pending changes.
     private fun isBackfillDone(): Boolean = prefs.getBoolean("backfill_done", false)
     private fun setBackfillDone() = prefs.edit().putBoolean("backfill_done", true).apply()
+
+    /**
+     * Compares the server's persistent id with the one this device last synced with.
+     *
+     * A different id means the server's database was restored from an older backup or recreated.
+     * Our cursor then points past anything it has, so pulls would return nothing forever. Start the
+     * cursor over and queue every local row for pushing again so the server is repopulated.
+     * Returns true when a reset happened.
+     */
+    internal fun reconcileServerIdentity(serverId: String): Boolean {
+        val known = prefs.getString("server_id", null)
+        prefs.edit().putString("server_id", serverId).apply()
+        if (known == null || known == serverId) return false
+        prefs.edit().putString("cursor", "0").putBoolean("backfill_done", false).apply()
+        return true
+    }
 
     suspend fun pushPending(baseUrl: String, token: String, deviceId: UUID, schemaVersion: Int, client: HttpClient) = withContext(Dispatchers.IO) {
         if (!isBackfillDone()) {
@@ -83,13 +111,12 @@ class SyncManager(private val context: Context, private val db: AppDatabase) {
                 throw Exception("Push failed: ${response.status.value}")
             }
             val resp = response.body<SyncPushResponse>()
-            resp.results.forEach { r ->
-                val id = UUID.fromString(r.opId)
-                when (r.status) {
-                    "applied", "rejected" -> db.outboxDao().delete(id)
-                    "retry" -> { /* leave for retry */ }
-                }
-            }
+            // Only a final verdict removes an op. "retry" (server fault, parent not there yet) keeps it
+            // queued: dropping it would silently lose the user's change.
+            val done = resp.results
+                .filter { it.status == "applied" || it.status == "rejected" }
+                .mapNotNull { runCatching { UUID.fromString(it.opId) }.getOrNull() }
+            if (done.isNotEmpty()) db.outboxDao().deleteMany(done)
         }
     }
 
@@ -112,8 +139,16 @@ class SyncManager(private val context: Context, private val db: AppDatabase) {
                 throw Exception("Pull failed: ${response.status.value}")
             }
             val resp = response.body<SyncPullResponse>()
+            // The cursor moves only after the whole page is applied: a crash mid-page re-pulls the
+            // page instead of skipping part of it.
             db.withTransaction {
-                resp.changes.forEach { c -> applyChange(c) }
+                // A row with a change still waiting in the outbox is newer here than on the server.
+                // Applying the server's copy would silently revert the user's edit; it will be
+                // pushed, and the next pull brings back whatever the server settled on.
+                val pending = db.outboxDao().pendingEntityIds().toSet()
+                resp.changes.forEach { c ->
+                    if (UUID.fromString(c.entityId) !in pending) applyChange(c)
+                }
             }
             cursor = resp.nextCursor
             setCursor(cursor)
@@ -121,64 +156,59 @@ class SyncManager(private val context: Context, private val db: AppDatabase) {
         }
     }
 
-    suspend fun performFullSync(serverClient: ServerClient, client: HttpClient): SyncResult {
-        val rawUrl = serverClient.serverUrl.trim()
-        if (rawUrl.isBlank()) {
+    suspend fun performFullSync(serverClient: ServerClient, client: HttpClient): SyncResult =
+        syncLock.withLock { syncLocked(serverClient, client) }
+
+    private suspend fun syncLocked(serverClient: ServerClient, client: HttpClient): SyncResult {
+        if (serverClient.serverUrl.isBlank()) {
             return SyncResult.OtherError("Server URL not configured")
         }
-        val cleanUrl = if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) "http://$rawUrl" else rawUrl
-        val baseUrl = cleanUrl.removeSuffix("/")
-
-        val token = serverClient.ensureValidToken(client)
-        if (token.isNullOrBlank()) {
-            return SyncResult.AuthError("Device not paired")
+        // Refuses plain http to anything outside the user's own network: tokens ride on every request.
+        val baseUrl = try {
+            ServerUrl.normalize(serverClient.serverUrl)
+        } catch (e: IllegalArgumentException) {
+            return SyncResult.OtherError(e.message ?: "Invalid server URL")
         }
 
-        val devId = serverClient.deviceId?.let {
-            try { UUID.fromString(it) } catch (_: Exception) { null }
-        } ?: UUID.randomUUID().also { serverClient.deviceId = it.toString() }
-
         return try {
-            pushPending(baseUrl, token, devId, 1, client)
-            pull(baseUrl, token, client)
-            val nowTime = java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-            serverClient.lastSyncTime = nowTime
-            SyncResult.Success
-        } catch (e: SyncAuthException) {
-            val refreshed = serverClient.refreshAuth(client)
-            var newToken = serverClient.accessToken
-            if (!refreshed || newToken.isNullOrBlank()) {
-                try {
-                    serverClient.accessToken = null
-                    newToken = serverClient.ensureValidToken(client)
-                } catch (_: Exception) {}
+            val token = serverClient.ensureValidToken(client)
+            if (token.isNullOrBlank()) {
+                return SyncResult.AuthError("Device not paired")
             }
-            if (!newToken.isNullOrBlank()) {
+            val devId = serverClient.deviceId?.let {
+                try { UUID.fromString(it) } catch (_: Exception) { null }
+            } ?: UUID.randomUUID().also { serverClient.deviceId = it.toString() }
+
+            try {
+                syncOnce(baseUrl, token, devId, serverClient, client)
+            } catch (e: SyncAuthException) {
+                // The server rejected the token (revoked, or expired between our check and the call):
+                // renew it once and go again.
+                val renewed = serverClient.renewToken(client)
+                if (renewed.isNullOrBlank()) return SyncResult.AuthError("Session expired, please reconnect")
                 try {
-                    pushPending(baseUrl, newToken, devId, 1, client)
-                    pull(baseUrl, newToken, client)
-                    val nowTime = java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-                    serverClient.lastSyncTime = nowTime
-                    SyncResult.Success
-                } catch (retryEx: SyncAuthException) {
-                    SyncResult.AuthError("Session expired, please reconnect")
-                } catch (retryEx: Exception) {
-                    if (retryEx is java.io.IOException || retryEx is java.nio.channels.UnresolvedAddressException || retryEx::class.simpleName?.contains("Timeout") == true) {
-                        SyncResult.NetworkError("Server unavailable")
-                    } else {
-                        SyncResult.OtherError(retryEx.localizedMessage ?: "Sync error")
-                    }
+                    syncOnce(baseUrl, renewed, devId, serverClient, client)
+                } catch (_: SyncAuthException) {
+                    return SyncResult.AuthError("Session expired, please reconnect")
                 }
-            } else {
-                SyncResult.AuthError("Authentication expired")
             }
+            SyncResult.Success
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             if (e is java.io.IOException || e is java.nio.channels.UnresolvedAddressException || e::class.simpleName?.contains("Timeout") == true) {
                 SyncResult.NetworkError("Server unavailable")
             } else {
                 SyncResult.OtherError(e.localizedMessage ?: "Sync error")
             }
         }
+    }
+
+    private suspend fun syncOnce(baseUrl: String, token: String, deviceId: UUID, serverClient: ServerClient, client: HttpClient) {
+        val health = serverClient.checkHealth(baseUrl, client)
+        reconcileServerIdentity(health.serverId)
+        pushPending(baseUrl, token, deviceId, 1, client)
+        pull(baseUrl, token, client)
+        serverClient.lastSyncTime = java.time.LocalDateTime.now().format(syncTimeFormat)
     }
 
     private suspend fun applyChange(c: ChangeDto) {

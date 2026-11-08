@@ -48,7 +48,9 @@ object SyncScheduler {
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             FOREGROUND_NAME,
-            ExistingWorkPolicy.KEEP,
+            // KEEP dropped a request made while a sync was running, so an edit made mid-sync waited up
+            // to 15 minutes. APPEND_OR_REPLACE queues exactly one more run behind the current one.
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
             request
         )
     }

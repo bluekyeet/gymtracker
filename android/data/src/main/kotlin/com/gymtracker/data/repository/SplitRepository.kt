@@ -3,6 +3,7 @@ package com.gymtracker.data.repository
 import androidx.room.withTransaction
 import com.gymtracker.data.db.AppDatabase
 import com.gymtracker.data.db.OutboxEntity
+import com.gymtracker.data.db.put
 import com.gymtracker.data.db.toDomain
 import com.gymtracker.data.db.toEntity
 import com.gymtracker.shared.domain.Split
@@ -25,7 +26,7 @@ class SplitRepository(private val db: AppDatabase) {
     suspend fun save(split: Split) {
         db.withTransaction {
             db.splitDao().upsert(split.toEntity())
-            db.outboxDao().insert(
+            db.outboxDao().put(
                 OutboxEntity(
                     opId = UUID.randomUUID(),
                     entity = "split",
@@ -43,7 +44,7 @@ class SplitRepository(private val db: AppDatabase) {
             db.splitDao().setActive(id)
             val updated = db.splitDao().getById(id)?.toDomain()
             if (updated != null) {
-                db.outboxDao().insert(
+                db.outboxDao().put(
                     OutboxEntity(
                         opId = UUID.randomUUID(),
                         entity = "split",
@@ -61,7 +62,7 @@ class SplitRepository(private val db: AppDatabase) {
         val now = java.time.Instant.now()
         db.withTransaction {
             db.splitDao().softDelete(id, now, now)
-            db.outboxDao().insert(
+            db.outboxDao().put(
                 OutboxEntity(
                     opId = UUID.randomUUID(),
                     entity = "split",
@@ -82,7 +83,7 @@ class SplitRepository(private val db: AppDatabase) {
     suspend fun saveDay(day: SplitDay) {
         db.withTransaction {
             db.splitDayDao().upsert(day.toEntity())
-            db.outboxDao().insert(
+            db.outboxDao().put(
                 OutboxEntity(
                     opId = UUID.randomUUID(),
                     entity = "split_day",
@@ -99,7 +100,7 @@ class SplitRepository(private val db: AppDatabase) {
         val now = java.time.Instant.now()
         db.withTransaction {
             db.splitDayDao().softDelete(id, now, now)
-            db.outboxDao().insert(
+            db.outboxDao().put(
                 OutboxEntity(
                     opId = UUID.randomUUID(),
                     entity = "split_day",
@@ -118,7 +119,7 @@ class SplitRepository(private val db: AppDatabase) {
     suspend fun saveDayExercise(e: SplitDayExercise) {
         db.withTransaction {
             db.splitDayExerciseDao().upsert(e.toEntity())
-            db.outboxDao().insert(
+            db.outboxDao().put(
                 OutboxEntity(
                     opId = UUID.randomUUID(),
                     entity = "split_day_exercise",
@@ -135,7 +136,7 @@ class SplitRepository(private val db: AppDatabase) {
         val now = java.time.Instant.now()
         db.withTransaction {
             db.splitDayExerciseDao().softDelete(id, now, now)
-            db.outboxDao().insert(
+            db.outboxDao().put(
                 OutboxEntity(
                     opId = UUID.randomUUID(),
                     entity = "split_day_exercise",
@@ -182,7 +183,7 @@ class SplitRepository(private val db: AppDatabase) {
             for (exerciseEntity in exercises) {
                 val ex = exerciseEntity.toDomain()
                 if (ex.id !in existingEntityIds) {
-                    db.outboxDao().insert(
+                    db.outboxDao().put(
                         OutboxEntity(
                             opId = UUID.randomUUID(),
                             entity = "exercise",
@@ -198,7 +199,7 @@ class SplitRepository(private val db: AppDatabase) {
             for (splitEntity in splits) {
                 val split = splitEntity.toDomain()
                 if (split.id !in existingEntityIds) {
-                    db.outboxDao().insert(
+                    db.outboxDao().put(
                         OutboxEntity(
                             opId = UUID.randomUUID(),
                             entity = "split",
@@ -212,7 +213,7 @@ class SplitRepository(private val db: AppDatabase) {
                 for (dayEntity in db.splitDayDao().getBySplit(split.id).first()) {
                     val day = dayEntity.toDomain()
                     if (day.id !in existingEntityIds) {
-                        db.outboxDao().insert(
+                        db.outboxDao().put(
                             OutboxEntity(
                                 opId = UUID.randomUUID(),
                                 entity = "split_day",
@@ -226,7 +227,7 @@ class SplitRepository(private val db: AppDatabase) {
                     for (deEntity in db.splitDayExerciseDao().getBySplitDay(day.id).first()) {
                         val de = deEntity.toDomain()
                         if (de.id !in existingEntityIds) {
-                            db.outboxDao().insert(
+                            db.outboxDao().put(
                                 OutboxEntity(
                                     opId = UUID.randomUUID(),
                                     entity = "split_day_exercise",

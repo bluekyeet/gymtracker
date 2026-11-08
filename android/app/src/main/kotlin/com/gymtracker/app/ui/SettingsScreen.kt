@@ -41,6 +41,14 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(nav: NavController) {
+    Column(Modifier.fillMaxSize()) {
+        SubScreenHeader(title = "Server and sync", onBack = { nav.popBackStack() })
+        Box(Modifier.weight(1f)) { SettingsContent(nav) }
+    }
+}
+
+@Composable
+private fun SettingsContent(nav: NavController) {
     val context = LocalContext.current
     val db = remember { DatabaseProvider.get(context) }
     val serverClient = remember { ServerClient(context, db) }
@@ -126,7 +134,13 @@ fun SettingsScreen(nav: NavController) {
                                     isConnected = true
                                     statusMessage = "Successfully connected and enrolled!"
                                 } catch (e: Exception) {
-                                    statusMessage = "Connection failed: ${e.javaClass.simpleName}: ${e.message ?: e.localizedMessage}"
+                                    // Our own messages (bad URL, wrong key, rate limit) are already sentences; only unexpected
+                                    // failures need the exception type to be diagnosable.
+                                    statusMessage = if (e is IllegalArgumentException || e is IllegalStateException) {
+                                        "Connection failed: ${e.message}"
+                                    } else {
+                                        "Connection failed: ${e.javaClass.simpleName}: ${e.message ?: e.localizedMessage}"
+                                    }
                                 } finally {
                                     isLoading = false
                                 }

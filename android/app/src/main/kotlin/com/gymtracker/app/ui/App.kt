@@ -12,9 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -73,11 +72,10 @@ fun App() {
     }
     val items = listOf(
         "today" to Icons.Filled.FitnessCenter,
-        "splits" to Icons.Filled.List,
-        "exercises" to Icons.Filled.Person,
+        "splits" to Icons.AutoMirrored.Filled.List,
+        "exercises" to Icons.Filled.Category,
         "history" to Icons.Filled.History,
-        "progress" to Icons.Filled.ShowChart,
-        "settings" to Icons.Filled.Settings
+        "progress" to Icons.Filled.ShowChart
     )
     Scaffold(
         bottomBar = {
@@ -95,14 +93,14 @@ fun App() {
                         icon = {
                             Icon(
                                 icon,
-                                contentDescription = route,
+                                contentDescription = null, // the label already names the tab
                                 modifier = Modifier.graphicsLayer {
                                     scaleX = iconScale
                                     scaleY = iconScale
                                 }
                             )
                         },
-                        label = { Text(route.replaceFirstChar { it.uppercase() }) },
+                        label = { Text(route.replaceFirstChar { it.uppercase() }, maxLines = 1, softWrap = false) },
                         selected = selected,
                         onClick = {
                             nav.navigate(route) {

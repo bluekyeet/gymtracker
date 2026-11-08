@@ -23,6 +23,9 @@ import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
+import com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState
+import com.patrykandpatrick.vico.core.cartesian.Zoom
 import com.patrykandpatrick.vico.core.cartesian.data.AxisValueOverrider
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
@@ -55,12 +58,20 @@ fun ExerciseDetailScreen(
     // Sessions with no weight logged have nothing to plot.
     val chartRows = history.filter { (it.topSet?.weightKg ?: 0.0) > 0.0 }
 
-    LaunchedEffect(chartRows) {
-        if (chartRows.size >= 2) {
+    // One point per calendar day at its real date, so the gaps between workouts are drawn to scale.
+    val topByDay = remember(chartRows) {
+        ChartTime.bestPerDay(chartRows.map { it.session.startedAt to (it.topSet?.weightKg ?: 0.0) })
+    }
+    val e1rmByDay = remember(chartRows) {
+        ChartTime.bestPerDay(chartRows.mapNotNull { r -> r.e1rm?.let { r.session.startedAt to it } })
+    }
+
+    LaunchedEffect(topByDay, e1rmByDay) {
+        if (topByDay.size >= 2) {
             modelProducer.runTransaction {
                 lineSeries {
-                    series(chartRows.map { it.topSet?.weightKg ?: 0.0 })
-                    series(chartRows.map { it.e1rm ?: 0.0 })
+                    series(topByDay.map { it.first }, topByDay.map { it.second })
+                    if (e1rmByDay.size >= 2) series(e1rmByDay.map { it.first }, e1rmByDay.map { it.second })
                 }
             }
         }
@@ -68,10 +79,6 @@ fun ExerciseDetailScreen(
 
     val shortDate = DateTimeFormatter.ofPattern("d MMM").withZone(ZoneId.systemDefault())
     val mediumDate = DateTimeFormatter.ofPattern("d MMM yyyy").withZone(ZoneId.systemDefault())
-    val chartLabels = chartRows.map { shortDate.format(it.session.startedAt) }
-    val xAxisFormatter = CartesianValueFormatter { value, _, _ ->
-        chartLabels.getOrNull(value.roundToInt()) ?: ""
-    }
 
     val bestWeight = history.mapNotNull { it.topSet?.weightKg }.maxOrNull()
     val bestE1rm = history.mapNotNull { it.e1rm }.maxOrNull()
@@ -115,7 +122,7 @@ fun ExerciseDetailScreen(
         Text("TOP SET & ESTIMATED 1RM", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(8.dp))
 
-        if (chartRows.size < 2) {
+        if (topByDay.size < 2) {
             Card(Modifier.fillMaxWidth()) {
                 Text(
                     "Perform this exercise in 2 or more workouts to see a trend.",
@@ -149,16 +156,25 @@ fun ExerciseDetailScreen(
                         chart = rememberCartesianChart(
                             rememberLineCartesianLayer(
                                 axisValueOverrider = AxisValueOverrider.fixed(
-                                    minX = null,
-                                    maxX = null,
+                                    minX = ChartTime.paddedRange(topByDay.map { it.first }).first,
+                                    maxX = ChartTime.paddedRange(topByDay.map { it.first }).second,
                                     minY = yMin - padding,
                                     maxY = yMax + padding
                                 )
                             ),
                             startAxis = rememberStartAxis(),
-                            bottomAxis = rememberBottomAxis(valueFormatter = xAxisFormatter)
+                            bottomAxis = rememberBottomAxis(
+                                valueFormatter = ChartTime.axisFormatter,
+                                guideline = null, // one line per day is just noise
+                                tick = null,
+                                itemPlacer = remember(topByDay) { ChartTime.labelPlacer(topByDay.map { it.first }) }
+                            )
                         ),
                         modelProducer = modelProducer,
+                        // Fit every point on screen. Left alone, a time axis is wider than the display and
+                        // the chart turns into a sideways-scrolling strip showing only its first days.
+                        scrollState = rememberVicoScrollState(scrollEnabled = false),
+                        zoomState = rememberVicoZoomState(zoomEnabled = false, initialZoom = Zoom.Content),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(200.dp)

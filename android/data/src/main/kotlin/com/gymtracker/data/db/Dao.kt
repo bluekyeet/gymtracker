@@ -14,6 +14,10 @@ interface ExerciseDao {
     @Query("SELECT * FROM exercises WHERE id = :id")
     suspend fun getById(id: UUID): ExerciseEntity?
 
+    /** Counts deleted rows too: an exercise the user deleted must not be seeded back. */
+    @Query("SELECT COUNT(*) FROM exercises WHERE name = :name AND isCustom = 0")
+    suspend fun countBuiltinNamed(name: String): Int
+
     @Upsert
     suspend fun upsert(entity: ExerciseEntity)
 
@@ -71,6 +75,9 @@ interface SplitDayExerciseDao {
     @Query("SELECT * FROM split_day_exercises WHERE splitDayId = :splitDayId AND deletedAt IS NULL ORDER BY sortKey, id")
     fun getBySplitDay(splitDayId: UUID): Flow<List<SplitDayExerciseEntity>>
 
+    @Query("SELECT * FROM split_day_exercises WHERE splitDayId = :splitDayId AND deletedAt IS NULL ORDER BY sortKey, id")
+    suspend fun listBySplitDay(splitDayId: UUID): List<SplitDayExerciseEntity>
+
     @Query("SELECT * FROM split_day_exercises WHERE id = :id")
     suspend fun getById(id: UUID): SplitDayExerciseEntity?
 
@@ -127,6 +134,30 @@ interface WorkoutExerciseDao {
     )
     suspend fun getLatestSessionIdFor(exerciseId: UUID, before: Instant): UUID?
 
+    /** Every live set ever logged for [exerciseId], tagged with its session, in one query. */
+    @Query(
+        """
+        SELECT s.*, we.sessionId AS sessionId FROM sets s
+        JOIN workout_exercises we ON we.id = s.workoutExerciseId
+        JOIN workout_sessions ws ON ws.id = we.sessionId
+        WHERE we.exerciseId = :exerciseId
+          AND s.deletedAt IS NULL AND we.deletedAt IS NULL AND ws.deletedAt IS NULL
+        ORDER BY ws.startedAt, we.sortKey, s.setNumber
+        """
+    )
+    suspend fun setsForExercise(exerciseId: UUID): List<SetInSession>
+
+    /** Every live session that contains [exerciseId]. */
+    @Query(
+        """
+        SELECT DISTINCT ws.* FROM workout_sessions ws
+        JOIN workout_exercises we ON we.sessionId = ws.id
+        WHERE we.exerciseId = :exerciseId AND we.deletedAt IS NULL AND ws.deletedAt IS NULL
+        ORDER BY ws.startedAt
+        """
+    )
+    suspend fun sessionsForExercise(exerciseId: UUID): List<WorkoutSessionEntity>
+
     @Upsert
     suspend fun upsert(entity: WorkoutExerciseEntity)
 
@@ -175,3 +206,9 @@ interface BodyWeightDao {
     @Query("UPDATE body_weights SET deletedAt = :deletedAt, updatedAt = :updatedAt WHERE id = :id")
     suspend fun softDelete(id: UUID, deletedAt: Instant, updatedAt: Instant)
 }
+
+/** A set plus the session it belongs to, as returned by the exercise-history join. */
+data class SetInSession(
+    @Embedded val set: SetEntity,
+    val sessionId: UUID
+)

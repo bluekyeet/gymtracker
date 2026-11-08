@@ -15,6 +15,7 @@ import androidx.navigation.NavController
 import com.gymtracker.data.repository.ExerciseRepository
 import com.gymtracker.data.repository.WorkoutRepository
 import com.gymtracker.shared.domain.Calculations
+import com.gymtracker.shared.domain.SetType
 import com.gymtracker.shared.domain.SetEntry
 import com.gymtracker.shared.domain.fuzzyScore
 import com.gymtracker.shared.domain.groupName
@@ -23,6 +24,9 @@ import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
+import com.patrykandpatrick.vico.compose.cartesian.rememberVicoZoomState
+import com.patrykandpatrick.vico.core.cartesian.Zoom
 import com.patrykandpatrick.vico.core.cartesian.data.AxisValueOverrider
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
@@ -68,52 +72,37 @@ fun ProgressScreen(nav: NavController, workoutRepo: WorkoutRepository, exerciseR
         val exId = selected ?: return@LaunchedEffect
         loading = true
         val cutoff = period.days?.let { Instant.now().minusSeconds(it * 24 * 60 * 60) }
-        val sessions = workoutRepo.observeSessions().first()
-            .filter { cutoff == null || it.startedAt >= cutoff }
-        val allSets = mutableListOf<SetEntry>()
-        val chartPoints = mutableListOf<SessionPoint>()
-        var last: Instant? = null
-        sessions.forEach { s ->
-            val forThis = workoutRepo.observeExercises(s.id).first().filter { it.exerciseId == exId }
-            if (forThis.isNotEmpty()) {
-                val sets = forThis.flatMap { workoutRepo.observeSets(it.id).first() }
-                allSets += sets
-                val prev = last
-                if (prev == null || s.startedAt > prev) last = s.startedAt
-                chartPoints += SessionPoint(s.startedAt, Calculations.bestEstimatedOneRepMax(sets))
-            }
-        }
+        // One history query for the exercise instead of one query per session and per exercise in it.
+        val rows = workoutRepo.historyForExercise(exId)
+            .filter { cutoff == null || it.session.startedAt >= cutoff }
+        // Sets at 0 kg are planned-but-unlogged (or bodyweight) sets, and warm-ups are not working
+        // weight: neither counts toward bests.
+        val logged = rows.flatMap { it.sets }.filter { it.weightKg > 0.0 && it.setType != SetType.WARMUP }
+        val chartPoints = rows.map { SessionPoint(it.session.startedAt, it.e1rm) }
         stats = ExerciseProgress(
-            bestWeight = allSets.mapNotNull { it.weightKg }.maxOrNull(),
-            bestE1rm = Calculations.bestEstimatedOneRepMax(allSets),
-            setCount = allSets.size,
-            sessionCount = chartPoints.size,
-            lastAt = last
+            bestWeight = logged.maxOfOrNull { it.weightKg },
+            bestE1rm = Calculations.bestEstimatedOneRepMax(logged),
+            setCount = logged.size,
+            sessionCount = rows.count { row -> row.sets.any { it.weightKg > 0.0 } },
+            lastAt = rows.lastOrNull { row -> row.sets.any { it.weightKg > 0.0 } }?.session?.startedAt
         )
         points = chartPoints.sortedBy { it.at }
         loading = false
     }
 
-    // Feed the chart whenever the selected exercise changes.
-    LaunchedEffect(points) {
-        val usable = points.filter { it.e1rm != null }
-        if (usable.size >= 2) {
-            modelProducer.runTransaction {
-                lineSeries {
-                    series(
-                        usable.mapIndexed { index, _ -> index.toDouble() },
-                        usable.map { it.e1rm ?: 0.0 }
-                    )
-                }
-            }
-        }
+    // One point per calendar day, placed at its real date.
+    val chartPoints = points.filter { it.e1rm != null }
+    val chartDays = remember(points) {
+        ChartTime.bestPerDay(points.mapNotNull { p -> p.e1rm?.let { p.at to it } })
     }
 
-    val shortDate = DateTimeFormatter.ofPattern("d MMM").withZone(ZoneId.systemDefault())
-    val chartPoints = points.filter { it.e1rm != null }
-    val dateLabels = chartPoints.map { shortDate.format(it.at) }
-    val xAxisFormatter = CartesianValueFormatter { value, _, _ ->
-        dateLabels.getOrNull(value.roundToInt()) ?: ""
+    // Feed the chart whenever the selected exercise changes.
+    LaunchedEffect(chartDays) {
+        if (chartDays.size >= 2) {
+            modelProducer.runTransaction {
+                lineSeries { series(chartDays.map { it.first }, chartDays.map { it.second }) }
+            }
+        }
     }
 
     Column(
@@ -276,7 +265,7 @@ fun ProgressScreen(nav: NavController, workoutRepo: WorkoutRepository, exerciseR
                 }
                 Spacer(Modifier.height(8.dp))
 
-                if (dateLabels.size < 2) {
+                if (chartDays.size < 2) {
                     val message = when {
                         points.isEmpty() -> "Log this exercise in 2 or more workouts to see a trend."
                         chartPoints.isEmpty() -> "No workouts in this time period."
@@ -296,8 +285,8 @@ fun ProgressScreen(nav: NavController, workoutRepo: WorkoutRepository, exerciseR
                     val yMax = yValues.maxOrNull() ?: 1.0
                     val padding = ((yMax - yMin) * 0.2).coerceAtLeast(1.0)
                     val overrider = AxisValueOverrider.fixed(
-                        minX = null,
-                        maxX = null,
+                        minX = ChartTime.paddedRange(chartDays.map { it.first }).first,
+                        maxX = ChartTime.paddedRange(chartDays.map { it.first }).second,
                         minY = yMin - padding,
                         maxY = yMax + padding
                     )
@@ -305,9 +294,18 @@ fun ProgressScreen(nav: NavController, workoutRepo: WorkoutRepository, exerciseR
                         chart = rememberCartesianChart(
                             rememberLineCartesianLayer(axisValueOverrider = overrider),
                             startAxis = rememberStartAxis(),
-                            bottomAxis = rememberBottomAxis(valueFormatter = xAxisFormatter)
+                            bottomAxis = rememberBottomAxis(
+                                valueFormatter = ChartTime.axisFormatter,
+                                guideline = null, // one line per day is just noise
+                                tick = null,
+                                itemPlacer = remember(chartDays) { ChartTime.labelPlacer(chartDays.map { it.first }) }
+                            )
                         ),
                         modelProducer = modelProducer,
+                        // Fit every point on screen. Left alone, a time axis is wider than the display and
+                        // the chart turns into a sideways-scrolling strip showing only its first days.
+                        scrollState = rememberVicoScrollState(scrollEnabled = false),
+                        zoomState = rememberVicoZoomState(zoomEnabled = false, initialZoom = Zoom.Content),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(220.dp)

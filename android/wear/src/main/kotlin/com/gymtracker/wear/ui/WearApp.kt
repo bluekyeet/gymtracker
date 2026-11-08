@@ -44,6 +44,7 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.material.*
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import com.gymtracker.data.OwnerId
 import com.gymtracker.data.db.DatabaseProvider
 import com.gymtracker.data.repository.ExerciseRepository
 import com.gymtracker.data.repository.SplitRepository
@@ -311,25 +312,7 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                 },
                 onStartWorkout = { dayId, dayName, exercises ->
                     scope.launch {
-                        val session = WorkoutSession(
-                            id = UUID.randomUUID(),
-                            userId = UUID.randomUUID(),
-                            splitDayId = dayId,
-                            dayName = dayName,
-                            startedAt = Instant.now()
-                        )
-                        workoutRepo.saveSession(session)
-                        exercises.forEachIndexed { idx, ex ->
-                            workoutRepo.saveExercise(
-                                WorkoutExercise(
-                                    id = UUID.randomUUID(),
-                                    sessionId = session.id,
-                                    exerciseId = ex.id,
-                                    exerciseName = ex.name,
-                                    sortKey = idx.toDouble()
-                                )
-                            )
-                        }
+                        val session = workoutRepo.startWorkout(dayId, dayName, exercises)
                         activeSession = session
                         val exList = workoutRepo.observeExercises(session.id).first()
                         sessionExercises = exList
@@ -493,7 +476,7 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                             val isFirst = splits.isEmpty()
                             val newSplit = Split(
                                 id = UUID.randomUUID(),
-                                userId = UUID.randomUUID(),
+                                userId = OwnerId.current,
                                 name = newName,
                                 isActive = isFirst
                             )
@@ -1968,7 +1951,7 @@ fun WatchSettingsScreen(
                         val cleanUrl = if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) "http://$trimmed" else trimmed
                         try {
                             serverClient.checkHealth(cleanUrl, httpClient)
-                            serverClient.enroll(cleanUrl, key, android.os.Build.MODEL, httpClient)
+                            serverClient.enroll(cleanUrl, key, android.os.Build.MODEL, httpClient, "watch")
                             saveStatus = "Connected & enrolled!"
                         } catch (e: Exception) {
                             saveStatus = "Connection failed: ${e.localizedMessage ?: "Unreachable"}"
