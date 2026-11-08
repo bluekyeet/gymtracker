@@ -19,6 +19,10 @@ import javax.crypto.spec.SecretKeySpec
 data class TokenPair(val accessToken: String, val refreshToken: String, val deviceId: UUID)
 
 class AuthService(private val jwtSecret: String) {
+    companion object {
+        const val REFRESH_GRACE_SECONDS = 30L
+    }
+
     private val argon2 = Argon2Factory.create()
 
     fun verifyPassword(hash: String, password: String): Boolean = argon2.verify(hash, password.toCharArray())
@@ -27,9 +31,10 @@ class AuthService(private val jwtSecret: String) {
 
     fun enrollDevice(deviceName: String, deviceKind: String): TokenPair {
         return transaction {
-            val user = Users.selectAll().firstOrNull() ?: run {
+            // insertIgnore: phone and watch enrolling at the same moment must not race on the first insert.
+            val user = Users.selectAll().orderBy(Users.createdAt).firstOrNull() ?: run {
                 val newUserId = UUID.fromString("00000000-0000-0000-0000-000000000001")
-                Users.insert {
+                Users.insertIgnore {
                     it[id] = newUserId
                     it[email] = "owner@powertrack.local"
                     it[passwordHash] = "enrolled_device_user_placeholder"
@@ -97,18 +102,34 @@ class AuthService(private val jwtSecret: String) {
     fun refresh(refreshToken: String): TokenPair? {
         val hash = sha256(refreshToken)
         return transaction {
-            val row = RefreshTokens.selectAll().where { RefreshTokens.tokenHash eq hash }.singleOrNull() ?: return@transaction null
+            val row = RefreshTokens.selectAll().where { RefreshTokens.tokenHash eq hash }.forUpdate().singleOrNull()
+                ?: return@transaction null
+            val now = Instant.now()
             if (row[RefreshTokens.used]) {
-                // reuse detected: revoke family
-                val family = row[RefreshTokens.familyId]
-                RefreshTokens.update({ RefreshTokens.familyId eq family }) { it[used] = true }
-                return@transaction null
+                // A replay seconds after rotation is a response that never arrived (or two syncs that
+                // raced), not theft: hand out a fresh token instead of locking the device out.
+                // A token revoked on purpose has usedAt cleared, so it never qualifies.
+                val rotatedAt = row[RefreshTokens.usedAt]?.toInstant()
+                val withinGrace = rotatedAt != null && rotatedAt.isAfter(now.minusSeconds(REFRESH_GRACE_SECONDS))
+                if (!withinGrace) {
+                    val family = row[RefreshTokens.familyId]
+                    RefreshTokens.update({ RefreshTokens.familyId eq family }) {
+                        it[used] = true
+                        it[usedAt] = null
+                    }
+                    return@transaction null
+                }
             }
-            if (row[RefreshTokens.expiresAt].toInstant().isBefore(Instant.now())) return@transaction null
-            // mark used
-            RefreshTokens.update({ RefreshTokens.id eq row[RefreshTokens.id] }) { it[used] = true }
+            if (row[RefreshTokens.expiresAt].toInstant().isBefore(now)) return@transaction null
             val deviceId = row[RefreshTokens.deviceId]
             val device = Devices.selectAll().where { Devices.id eq deviceId }.singleOrNull() ?: return@transaction null
+            if (device[Devices.revokedAt] != null || device[Devices.deletedAt] != null) return@transaction null
+            if (!row[RefreshTokens.used]) {
+                RefreshTokens.update({ RefreshTokens.id eq row[RefreshTokens.id] }) {
+                    it[used] = true
+                    it[usedAt] = OffsetDateTime.now(ZoneOffset.UTC)
+                }
+            }
             val userId = device[Devices.userId]
             val familyId = row[RefreshTokens.familyId]
             val newRefresh = UUID.randomUUID().toString()
@@ -125,15 +146,24 @@ class AuthService(private val jwtSecret: String) {
         }
     }
 
-    fun revokeDevice(deviceId: UUID) {
-        transaction {
-            Devices.update({ Devices.id eq deviceId }) {
-                it[revokedAt] = OffsetDateTime.now(ZoneOffset.UTC)
-                it[updatedAt] = OffsetDateTime.now(ZoneOffset.UTC)
-            }
-            // revoke all refresh tokens for device
-            RefreshTokens.update({ RefreshTokens.deviceId eq deviceId }) { it[used] = true }
+    /** Revokes [deviceId] only if it belongs to [userId]. Returns false when there is no such device. */
+    fun revokeDevice(userId: UUID, deviceId: UUID): Boolean = transaction {
+        val owned = Devices.selectAll().where { (Devices.id eq deviceId) and (Devices.userId eq userId) }.any()
+        if (!owned) return@transaction false
+        Devices.update({ Devices.id eq deviceId }) {
+            it[revokedAt] = OffsetDateTime.now(ZoneOffset.UTC)
+            it[updatedAt] = OffsetDateTime.now(ZoneOffset.UTC)
         }
+        RefreshTokens.update({ RefreshTokens.deviceId eq deviceId }) {
+            it[used] = true
+            it[usedAt] = null
+        }
+        true
+    }
+
+    fun isDeviceActive(deviceId: UUID): Boolean = transaction {
+        Devices.selectAll().where { Devices.id eq deviceId }.singleOrNull()
+            ?.let { it[Devices.revokedAt] == null && it[Devices.deletedAt] == null } ?: false
     }
 
     fun listDevices(userId: UUID): List<DeviceRow> = transaction {
@@ -152,7 +182,6 @@ class AuthService(private val jwtSecret: String) {
             .sign(com.auth0.jwt.algorithms.Algorithm.HMAC256(jwtSecret))
     }
 
-    // Actually use JJWT? Not in deps. Let's switch to com.auth0.jwt or manual. We'll adjust.
     fun createUser(email: String, password: String) {
         transaction {
             Users.insert {
@@ -173,11 +202,3 @@ class AuthService(private val jwtSecret: String) {
 
 data class DeviceRow(val id: UUID, val name: String, val kind: String, val revokedAt: OffsetDateTime?)
 
-// Helper to parse JWT later in Ktor
-fun verifyAccessToken(token: String, secret: String): Pair<UUID, UUID>? {
-    return try {
-        val parts = token.split(".")
-        // We'll use a simple approach: use io.ktor.server.auth.jwt? Instead implement with com.auth0.jwt if available.
-        null
-    } catch (e: Exception) { null }
-}

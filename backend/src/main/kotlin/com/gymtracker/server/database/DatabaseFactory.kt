@@ -13,7 +13,7 @@ object DatabaseFactory {
             this.password = password
             maximumPoolSize = 10
             isAutoCommit = false
-            transactionIsolation = "TRANSACTION_REPEATABLE_READ"
+            transactionIsolation = "TRANSACTION_READ_COMMITTED"
         }
         val dataSource = HikariDataSource(config)
         Flyway.configure().dataSource(dataSource).load().migrate()

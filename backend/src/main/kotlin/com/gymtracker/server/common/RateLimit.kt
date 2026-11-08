@@ -4,13 +4,14 @@ import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.response.*
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 
-object RateLimiter {
+class RateLimiter(private val clock: () -> Long = System::currentTimeMillis) {
     private val buckets = ConcurrentHashMap<String, MutableList<Long>>()
+    private var lastSweep = clock()
 
     fun allow(key: String, limit: Int, windowMs: Long): Boolean {
-        val now = System.currentTimeMillis()
+        val now = clock()
+        sweep(now, windowMs)
         val list = buckets.computeIfAbsent(key) { mutableListOf() }
         synchronized(list) {
             list.removeAll { it < now - windowMs }
@@ -19,23 +20,38 @@ object RateLimiter {
             return true
         }
     }
+
+    /** Drops idle keys so a stream of distinct clients cannot grow the map without bound. */
+    private fun sweep(now: Long, windowMs: Long) {
+        if (now - lastSweep < windowMs) return
+        lastSweep = now
+        buckets.entries.removeIf { (_, list) -> synchronized(list) { list.none { it >= now - windowMs } } }
+    }
+
+    companion object {
+        val shared = RateLimiter()
+    }
 }
 
-fun Application.installRateLimit() {
-    intercept(ApplicationCallPipeline.Call) {
-        val path = call.request.local.uri
-        val ip = call.request.local.remoteHost
-        val key = when {
-            path.contains("/auth/login") -> "login:$ip"
-            path.contains("/sync") -> "sync:$ip"
-            else -> null
-        }
-        if (key != null) {
-            val (limit, window) = if (path.contains("/auth/login")) 5 to 60_000L else 60 to 60_000L
-            if (!RateLimiter.allow(key, limit, window)) {
-                call.respond(HttpStatusCode.TooManyRequests, mapOf("error" to "rate_limited"))
-                finish()
-            }
+private data class Rule(val name: String, val limit: Int)
+
+private fun ruleFor(path: String): Rule? = when {
+    path.startsWith("/v1/auth/login") -> Rule("login", 5)
+    // Enrollment key guessing is the one unauthenticated way in, so it is limited hardest.
+    path.startsWith("/v1/devices/enroll") -> Rule("enroll", 5)
+    path.startsWith("/v1/auth/refresh") -> Rule("refresh", 30)
+    path.startsWith("/v1/sync") -> Rule("sync", 120)
+    else -> null
+}
+
+fun Application.installRateLimit(limiter: RateLimiter = RateLimiter.shared) {
+    intercept(ApplicationCallPipeline.Plugins) {
+        val rule = ruleFor(call.request.local.uri) ?: return@intercept
+        val client = call.request.local.remoteAddress
+        if (!limiter.allow("${rule.name}:$client", rule.limit, 60_000L)) {
+            call.response.header(HttpHeaders.RetryAfter, "60")
+            call.respond(HttpStatusCode.TooManyRequests, mapOf("error" to "rate_limited"))
+            finish()
         }
     }
 }

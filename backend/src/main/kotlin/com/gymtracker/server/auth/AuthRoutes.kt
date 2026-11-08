@@ -55,9 +55,13 @@ fun Application.authRoutes(authService: AuthService) {
                 call.respond(devices)
             }
             post("/v1/devices/{id}/revoke") {
-                val id = UUID.fromString(call.parameters["id"]!!)
-                authService.revokeDevice(id)
-                call.respond(HttpStatusCode.NoContent)
+                val principal = call.principal<JWTPrincipal>()!!
+                val userId = UUID.fromString(principal.subject)
+                val id = call.parameters["id"]?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "bad_request"))
+                // Someone else's device and a missing device look the same: 404.
+                if (authService.revokeDevice(userId, id)) call.respond(HttpStatusCode.NoContent)
+                else call.respond(HttpStatusCode.NotFound, mapOf("error" to "not_found"))
             }
         }
     }

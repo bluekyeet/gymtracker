@@ -25,3 +25,5 @@ EOF
 echo "Secrets generated successfully in $SECRET_FILE."
 echo "Your device enrollment key is: $ENROLL_KEY"
 echo "Save this key; you will need it to enroll phones and watches."
+echo "Start the stack with:  docker compose --env-file .env.secrets up -d"
+echo "(the API refuses to start without a private ENROLLMENT_KEY and TOKEN_SIGNING_KEY)"

@@ -165,7 +165,14 @@ object RefreshTokens : Table("refresh_tokens") {
     val tokenHash = text("token_hash")
     val familyId = uuid("family_id")
     val used = bool("used").default(false)
+    val usedAt = timestampWithTimeZone("used_at").nullable()
     val expiresAt = timestampWithTimeZone("expires_at")
     val createdAt = timestampWithTimeZone("created_at")
     override val primaryKey = PrimaryKey(id)
+}
+
+object ServerMeta : Table("server_meta") {
+    val key = text("key")
+    val value = text("value")
+    override val primaryKey = PrimaryKey(key)
 }

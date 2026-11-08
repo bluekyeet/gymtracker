@@ -19,6 +19,11 @@ class AuthTest {
         assertNotNull(pair)
         val refreshed = auth.refresh(pair!!.refreshToken)
         assertNotNull(refreshed)
+        // A replay seconds after rotation is a lost response and is forgiven (see AuthHardeningTest);
+        // reuse detection applies once the grace window has passed.
+        org.jetbrains.exposed.sql.transactions.transaction {
+            exec("UPDATE refresh_tokens SET used_at = now() - interval '5 minutes' WHERE used")
+        }
         val reuse = auth.refresh(pair.refreshToken)
         assertNull(reuse)
     }

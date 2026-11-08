@@ -10,11 +10,24 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
+import kotlinx.serialization.SerializationException
+import org.slf4j.LoggerFactory
 
 class SyncService {
     private val json = Json { ignoreUnknownKeys = true }
+    private val log = LoggerFactory.getLogger(SyncService::class.java)
+
+    private companion object {
+        const val MAX_OPS_PER_PUSH = 1000
+        const val MAX_NAME_LENGTH = 200
+        val SYNCED_ENTITIES = setOf(
+            "exercise", "split", "split_day", "split_day_exercise",
+            "workout_session", "workout_exercise", "set"
+        )
+    }
 
     fun push(userId: UUID, req: SyncPushRequest): SyncPushResponse {
+        require(req.operations.size <= MAX_OPS_PER_PUSH) { "too many operations in one push" }
         return transaction {
             // lock user row
             val userRow = Users.selectAll().where { Users.id eq userId }.forUpdate().single()
@@ -22,13 +35,19 @@ class SyncService {
             val results = mutableListOf<OpResult>()
             // One bulk idempotency check instead of a SELECT per op — this used to be the main
             // cost of re-pushing a large outbox (every already-applied op still cost a round trip).
-            val opIds = req.operations.map { UUID.fromString(it.opId) }
+            val opIds = req.operations.mapNotNull { parseUuid(it.opId) }
             val existingResults = if (opIds.isEmpty()) emptyMap() else
                 AppliedOps.selectAll().where { AppliedOps.opId inList opIds }
                     .associate { it[AppliedOps.opId] to it[AppliedOps.result] }
             for (op in req.operations) {
+                val opId = parseUuid(op.opId)
+                if (opId == null || parseUuid(op.entityId) == null) {
+                    // Nothing sensible to store or retry: the op can never be valid.
+                    results.add(OpResult(op.opId, "rejected", reason = "invalid_id"))
+                    continue
+                }
                 // idempotency
-                val stored = existingResults[UUID.fromString(op.opId)]
+                val stored = existingResults[opId]
                 if (stored != null) {
                     // stored format "applied:5" or "rejected:deleted"
                     val parts = stored.split(":", limit = 2)
@@ -46,14 +65,161 @@ class SyncService {
                     if (applied.second) seq = applied.third
                 } catch (e: Exception) {
                     exec("ROLLBACK TO SAVEPOINT $savepoint")
-                    storeOp(UUID.fromString(op.opId), userId, "rejected:server_error")
-                    results.add(OpResult(op.opId, "rejected", reason = "server_error: ${e.message?.take(200)}"))
+                    if (e is SerializationException || e is IllegalArgumentException) {
+                        // The payload itself is bad, so retrying can never help. Remember the verdict.
+                        storeOp(opId, userId, "rejected:invalid_data")
+                        results.add(OpResult(op.opId, "rejected", reason = "invalid_data"))
+                    } else {
+                        // A database or server fault says nothing about the op. Do NOT store a verdict
+                        // and do NOT tell the client it was rejected: the client deletes rejected ops,
+                        // which would silently lose the user's data. Leave it queued for the next sync.
+                        log.error("push op ${op.opId} (${op.entity}/${op.type}) failed; will be retried", e)
+                        results.add(OpResult(op.opId, "retry", reason = "server_error"))
+                    }
                 }
             }
             // update user last_seq
             Users.update({ Users.id eq userId }) { it[lastSeq] = seq }
             SyncPushResponse(results)
         }
+    }
+
+    private fun parseUuid(value: String): UUID? = runCatching { UUID.fromString(value) }.getOrNull()
+
+    private data class OwnerLookup(val exists: Boolean, val owner: UUID?)
+
+    private val missing = OwnerLookup(false, null)
+
+    /** Who owns [id], following parent links for entities that have no user column of their own. */
+    private fun lookupOwner(entity: String, id: UUID): OwnerLookup = when (entity) {
+        "exercise" -> Exercises.select(Exercises.userId).where { Exercises.id eq id }.singleOrNull()
+            ?.let { OwnerLookup(true, it[Exercises.userId]) } ?: missing
+        "split" -> Splits.select(Splits.userId).where { Splits.id eq id }.singleOrNull()
+            ?.let { OwnerLookup(true, it[Splits.userId]) } ?: missing
+        "split_day" -> SplitDays.join(Splits, JoinType.INNER, SplitDays.splitId, Splits.id)
+            .select(Splits.userId).where { SplitDays.id eq id }.singleOrNull()
+            ?.let { OwnerLookup(true, it[Splits.userId]) } ?: missing
+        "split_day_exercise" -> SplitDayExercises
+            .join(SplitDays, JoinType.INNER, SplitDayExercises.splitDayId, SplitDays.id)
+            .join(Splits, JoinType.INNER, SplitDays.splitId, Splits.id)
+            .select(Splits.userId).where { SplitDayExercises.id eq id }.singleOrNull()
+            ?.let { OwnerLookup(true, it[Splits.userId]) } ?: missing
+        "workout_session" -> WorkoutSessions.select(WorkoutSessions.userId).where { WorkoutSessions.id eq id }.singleOrNull()
+            ?.let { OwnerLookup(true, it[WorkoutSessions.userId]) } ?: missing
+        "workout_exercise" -> WorkoutExercises
+            .join(WorkoutSessions, JoinType.INNER, WorkoutExercises.sessionId, WorkoutSessions.id)
+            .select(WorkoutSessions.userId).where { WorkoutExercises.id eq id }.singleOrNull()
+            ?.let { OwnerLookup(true, it[WorkoutSessions.userId]) } ?: missing
+        "set" -> Sets
+            .join(WorkoutExercises, JoinType.INNER, Sets.workoutExerciseId, WorkoutExercises.id)
+            .join(WorkoutSessions, JoinType.INNER, WorkoutExercises.sessionId, WorkoutSessions.id)
+            .select(WorkoutSessions.userId).where { Sets.id eq id }.singleOrNull()
+            ?.let { OwnerLookup(true, it[WorkoutSessions.userId]) } ?: missing
+        else -> missing
+    }
+
+    private fun JsonElement.uuidField(name: String): UUID? =
+        (this as? JsonObject)?.get(name)?.jsonPrimitive?.contentOrNull?.let { UUID.fromString(it) }
+
+    /** The parent entity a record points at, or null when it has none. */
+    private fun parentOf(entity: String, data: JsonElement): Pair<String, UUID?>? = when (entity) {
+        "split_day" -> "split" to data.uuidField("splitId")
+        "split_day_exercise" -> "split_day" to data.uuidField("splitDayId")
+        "workout_exercise" -> "workout_session" to data.uuidField("sessionId")
+        "set" -> "workout_exercise" to data.uuidField("workoutExerciseId")
+        else -> null
+    }
+
+    private fun ownedBy(userId: UUID, owner: UUID?) = owner == null || owner == userId
+
+    /**
+     * Ownership and validity checks that run before any write. Returns the verdict to send back
+     * (as status, revision, reason), or null when the op may proceed.
+     *
+     * The user always comes from the token. Every record and every relation the op names must
+     * belong to that user; a missing parent is `retry` because it may simply not have been pushed yet.
+     */
+    private fun guardUpsert(userId: UUID, op: SyncOperation, data: JsonElement): Triple<String, Long?, String?>? {
+        val entityId = UUID.fromString(op.entityId)
+        val own = lookupOwner(op.entity, entityId)
+        if (own.exists && !ownedBy(userId, own.owner)) return Triple("rejected", null, "forbidden")
+
+        val parent = parentOf(op.entity, data)
+        if (parent != null) {
+            val parentId = parent.second ?: return Triple("rejected", null, "invalid_data")
+            val parentOwner = lookupOwner(parent.first, parentId)
+            if (!parentOwner.exists) return Triple("retry", null, "parent_missing")
+            if (!ownedBy(userId, parentOwner.owner)) return Triple("rejected", null, "forbidden")
+        }
+        if (op.entity == "split_day_exercise" || op.entity == "workout_exercise") {
+            val exerciseId = data.uuidField("exerciseId")
+            if (exerciseId != null) {
+                val exercise = lookupOwner("exercise", exerciseId)
+                if (!exercise.exists) return Triple("retry", null, "exercise_missing")
+                if (!ownedBy(userId, exercise.owner)) return Triple("rejected", null, "forbidden")
+            }
+        }
+        validatePayload(op.entity, data)
+        return null
+    }
+
+    private fun guardDelete(userId: UUID, op: SyncOperation): Triple<String, Long?, String?>? {
+        val own = lookupOwner(op.entity, UUID.fromString(op.entityId))
+        if (own.exists && !ownedBy(userId, own.owner)) return Triple("rejected", null, "forbidden")
+        return null
+    }
+
+    /** Throws [IllegalArgumentException] (a permanent rejection) for values the app itself would never send. */
+    private fun validatePayload(entity: String, data: JsonElement) {
+        when (entity) {
+            "exercise" -> requireName(json.decodeFromJsonElement<Exercise>(data).name)
+            "split" -> requireName(json.decodeFromJsonElement<Split>(data).name)
+            "split_day" -> {
+                val m = json.decodeFromJsonElement<SplitDay>(data)
+                requireName(m.name)
+                require(m.weekdays.all { it in 1..7 }) { "weekday out of range" }
+                require(m.sortKey.isFinite()) { "sortKey" }
+            }
+            "split_day_exercise" -> {
+                val m = json.decodeFromJsonElement<SplitDayExercise>(data)
+                require(m.targetSets == null || m.targetSets in 1..50) { "targetSets" }
+                require(m.targetReps == null || m.targetReps in 1..1000) { "targetReps" }
+                require(m.sortKey.isFinite()) { "sortKey" }
+            }
+            "workout_exercise" -> {
+                val m = json.decodeFromJsonElement<WorkoutExercise>(data)
+                requireName(m.exerciseName)
+                require(m.sortKey.isFinite()) { "sortKey" }
+            }
+            "set" -> {
+                val m = json.decodeFromJsonElement<SetEntry>(data)
+                require(m.setNumber >= 1) { "setNumber" }
+                require(Validation.isValidWeightKg(m.weightKg)) { "weightKg" }
+                require(Validation.isValidReps(m.reps)) { "reps" }
+                require(Validation.isValidRpe(m.rpe)) { "rpe" }
+            }
+            "workout_session" -> json.decodeFromJsonElement<WorkoutSession>(data)
+        }
+    }
+
+    private fun requireName(name: String) =
+        require(name.isNotBlank() && name.length <= MAX_NAME_LENGTH) { "name" }
+
+    /**
+     * Two devices adding a set to the same exercise both pick "last + 1". The unique index would
+     * reject the second one and the set would be lost, so the server hands it the next free number
+     * instead; the client receives the corrected row on its next pull.
+     */
+    private fun freeSetNumber(workoutExerciseId: UUID, setId: UUID, wanted: Int): Int {
+        val taken = Sets.selectAll().where {
+            (Sets.workoutExerciseId eq workoutExerciseId) and (Sets.setNumber eq wanted) and
+                Sets.deletedAt.isNull() and (Sets.id neq setId)
+        }.any()
+        if (!taken) return wanted
+        val highest = Sets.select(Sets.setNumber.max())
+            .where { (Sets.workoutExerciseId eq workoutExerciseId) and Sets.deletedAt.isNull() }
+            .single()[Sets.setNumber.max()] ?: 0
+        return highest + 1
     }
 
     // returns (result, seqChanged, newSeq)
@@ -77,7 +243,7 @@ class SyncService {
                     result = OpResult(op.opId, "rejected", reason = r.third)
                     seqChanged = false
                 } else {
-                    result = OpResult(op.opId, "retry")
+                    result = OpResult(op.opId, "retry", reason = r.third)
                     seqChanged = false
                 }
             }
@@ -94,7 +260,7 @@ class SyncService {
                     result = OpResult(op.opId, "rejected", reason = r.third)
                     seqChanged = false
                 } else {
-                    result = OpResult(op.opId, "retry")
+                    result = OpResult(op.opId, "retry", reason = r.third)
                     seqChanged = false
                 }
             }
@@ -109,6 +275,8 @@ class SyncService {
     // returns (status, newRevision, reason)
     private fun handleUpsert(userId: UUID, op: SyncOperation, now: OffsetDateTime): Triple<String, Long?, String?> {
         val data = op.data ?: return Triple("rejected", null, "missing_data")
+        if (op.entity !in SYNCED_ENTITIES) return Triple("rejected", null, "unsupported_entity")
+        guardUpsert(userId, op, data)?.let { return it }
         return when (op.entity) {
             "exercise" -> {
                 val m = json.decodeFromJsonElement<Exercise>(data)
@@ -288,11 +456,12 @@ class SyncService {
                 val existing = Sets.selectAll().where { Sets.id eq UUID.fromString(op.entityId) }.singleOrNull()
                 if (existing != null && existing[Sets.deletedAt] != null) return Triple("rejected", null, "deleted")
                 val newRev = (existing?.get(Sets.revision) ?: 0) + 1
+                val number = freeSetNumber(m.workoutExerciseId, UUID.fromString(op.entityId), m.setNumber)
                 if (existing == null) {
                     Sets.insert {
                         it[id] = UUID.fromString(op.entityId)
                         it[workoutExerciseId] = m.workoutExerciseId
-                        it[setNumber] = m.setNumber
+                        it[setNumber] = number
                         it[weightKg] = m.weightKg.toBigDecimal()
                         it[reps] = m.reps
                         it[rpe] = m.rpe?.toBigDecimal()
@@ -303,7 +472,7 @@ class SyncService {
                     }
                 } else {
                     Sets.update({ Sets.id eq UUID.fromString(op.entityId) }) {
-                        it[setNumber] = m.setNumber
+                        it[setNumber] = number
                         it[weightKg] = m.weightKg.toBigDecimal()
                         it[reps] = m.reps
                         it[rpe] = m.rpe?.toBigDecimal()
@@ -319,6 +488,8 @@ class SyncService {
     }
 
     private fun handleDelete(userId: UUID, op: SyncOperation, now: OffsetDateTime): Triple<String, Long?, String?> {
+        if (op.entity !in SYNCED_ENTITIES) return Triple("rejected", null, "unsupported_entity")
+        guardDelete(userId, op)?.let { return it }
         return when (op.entity) {
             "exercise" -> {
                 val existing = Exercises.selectAll().where { Exercises.id eq UUID.fromString(op.entityId) }.singleOrNull()

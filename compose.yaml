@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-gymtracker}
       POSTGRES_USER: ${POSTGRES_USER:-gymtracker}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
@@ -24,11 +24,9 @@ services:
       - PORT=${API_PORT:-8081}
       - JDBC_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB:-gymtracker}
       - POSTGRES_USER=${POSTGRES_USER:-gymtracker}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
-      - ENROLLMENT_KEY=${ENROLLMENT_KEY:-k7m2-x9qd-4hrt-wc3f-p8ze-n6ay}
-      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-adminpassword}
-      - TOKEN_SIGNING_KEY=${TOKEN_SIGNING_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      - ENROLLMENT_KEY=${ENROLLMENT_KEY:?set ENROLLMENT_KEY in .env}
+      - TOKEN_SIGNING_KEY=${TOKEN_SIGNING_KEY:?set TOKEN_SIGNING_KEY in .env}
       - ENROLLMENT_ENABLED=${ENROLLMENT_ENABLED:-true}
       - TZ=${TZ:-UTC}
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -75,7 +73,7 @@ services:
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-gymtracker}
       - POSTGRES_USER=${POSTGRES_USER:-gymtracker}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     command: /scripts/backup.sh
     networks:
       - internal

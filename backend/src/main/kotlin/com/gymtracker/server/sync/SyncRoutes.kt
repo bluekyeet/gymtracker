@@ -26,7 +26,7 @@ fun Application.syncRoutes(syncService: SyncService) {
                 val principal = call.principal<JWTPrincipal>()!!
                 val userId = UUID.fromString(principal.payload.subject)
                 val cursor = call.request.queryParameters["cursor"] ?: "0"
-                val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
+                val limit = (call.request.queryParameters["limit"]?.toIntOrNull() ?: 100).coerceIn(1, 1000)
                 call.respond(syncService.pull(userId, cursor, limit))
             }
         }
