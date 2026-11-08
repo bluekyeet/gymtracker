@@ -16,8 +16,10 @@ Each project builds and tests independently.
 
 ```text
 docker compose -f infra/compose.yaml up -d postgres
-./gradlew -p backend test
+./gradlew :backend:test
 ```
+
+Run it from the repository root, not with `-p backend`: the backend resolves `:shared` through the root `settings.gradle.kts`. The backend and its tests need `ENROLLMENT_KEY`-style secrets only at runtime; tests supply their own. Database tests use `DATABASE_URL`, `POSTGRES_USER` and `POSTGRES_PASSWORD` (defaults match `infra/compose.yaml`).
 
 ## android
 

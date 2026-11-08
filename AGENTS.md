@@ -143,7 +143,7 @@ Learned the hard way. Do not repeat them.
 - **Room uses WAL.** Reading only `gymtracker.db` gives stale results. Pull `gymtracker.db`, `-wal` and `-shm` together, or `PRAGMA wal_checkpoint(TRUNCATE)` first.
 - **Rebuild ⇒ reinstall.** After every build, `adb install -r` the APK before looking at the emulator. Verifying new code against a stale APK wastes a session.
 - **`Start-Workout.userId` is currently a random UUID** — it must become the real owner's id when auth lands. Do not copy that pattern.
-- **The outbox is drained but never filled.** `SyncManager` pushes what is in the outbox, but repositories do not write to it yet, so offline changes do not sync. This is the top functional gap; fix it before claiming sync works.
+- **Outbox writes go through `OutboxDao.put`.** It coalesces older queued upserts of the same row, so repositories must not call `insert` directly. A server `retry` verdict keeps an op queued; only `applied` and `rejected` remove it.
 
 ## Technology choices (fixed)
 
@@ -213,7 +213,7 @@ Filled in — see `docs/BUILD_AND_TEST.md`. Summary:
 
 ```text
 ./gradlew -p shared test
-docker compose -f infra/compose.yaml up -d postgres && ./gradlew -p backend test
+docker compose -f infra/compose.yaml up -d postgres && ./gradlew :backend:test
 ./gradlew -p android :data:testDebugUnitTest :app:assembleDebug :wear:assembleDebug
 npm --prefix web ci && npm --prefix web run check && npm --prefix web run lint && npm --prefix web test && npm --prefix web run build
 ```

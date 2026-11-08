@@ -24,7 +24,7 @@ A personal gym tracker for one person: an Android phone app, a Wear OS watch app
 ```text
 ./gradlew -p shared test
 docker compose -f infra/compose.yaml up -d postgres
-./gradlew -p backend test
+./gradlew :backend:test
 ./gradlew -p android :data:testDebugUnitTest :app:assembleDebug :wear:assembleDebug
 npm --prefix web ci && npm --prefix web run check && npm --prefix web run lint && npm --prefix web run build
 ```
@@ -77,7 +77,11 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 adb install -r android/wear/build/outputs/apk/debug/wear-debug.apk
 ```
 
-On first launch, open **Settings** and enter the server URL (e.g. `http://10.0.2.2:8081` from the Android emulator talking to a host-machine server, or your server's LAN/public address on real hardware) plus the enrollment key. Pairing a watch after the phone is already enrolled can be done by scanning the QR code shown in the phone's Settings screen. Full emulator verification workflow (uiautomator dumps, screenshots, reading the Room database) is in `docs/BUILD_AND_TEST.md`.
+On first launch, open **Settings** and enter the server URL (e.g. `http://10.0.2.2:8081` from the Android emulator talking to a host-machine server, or your server's LAN/public address on real hardware) plus the enrollment key. Pairing a watch after the phone is already enrolled can be done by scanning the QR code shown in the phone's Settings screen. Plain `http://` is accepted only for servers on your own network (`192.168.x.x`, `10.x.x.x`, `172.16-31.x.x`, Tailscale `100.x.x.x` / `*.ts.net`, `*.local`, `localhost`); a public server must use `https://`, and a URL typed without a scheme gets the safe one automatically. The apps refuse to send a token or enrollment key over plain http to anything else. App data is excluded from Android backups (`allowBackup=false`); everything lives on your server anyway.
+
+The website reads the API origin from `PUBLIC_API_BASE_URL` at runtime (with or without a trailing `/v1`; default `http://localhost:8081`), signs in with an email and password, and renews its session with the refresh token.
+
+Full emulator verification workflow (uiautomator dumps, screenshots, reading the Room database) is in `docs/BUILD_AND_TEST.md`.
 
 ### 3. Website
 
@@ -92,4 +96,4 @@ Set `VITE_API_BASE` before `npm run build` to point the website at your API — 
 
 ### Known gaps in server configuration
 
-Some variables referenced in `compose.yaml` / `compose.secrets.example.yaml` aren't wired up in the backend yet and currently do nothing: `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ALLOWED_ORIGIN` (no CORS plugin is installed), and `ENROLLMENT_ENABLED`. The website's `/v1/auth/login` is also not practically usable yet — there's no server command that sets the owner's password, only device enrollment via `ENROLLMENT_KEY`. `.env.example` only lists variables the backend actually reads today.
+Some variables referenced in `compose.yaml` / `compose.secrets.example.yaml` aren't wired up in the backend yet and currently do nothing: `ADMIN_EMAIL`, `ADMIN_PASSWORD` and `ALLOWED_ORIGIN` (no CORS plugin is installed). `ENROLLMENT_KEY` and `TOKEN_SIGNING_KEY` are required and the API refuses to start with a missing or placeholder value; `ENROLLMENT_ENABLED=false` turns device enrollment off. The website's `/v1/auth/login` is also not practically usable yet — there's no server command that sets the owner's password, only device enrollment via `ENROLLMENT_KEY`. `.env.example` only lists variables the backend actually reads today.
