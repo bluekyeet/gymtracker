@@ -1,30 +1,41 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { setToken, api } from '$lib/api';
+  import { ApiError, isSignedIn, login } from '$lib/api';
 
-  let email = '';
-  let password = '';
-  let error = '';
+  let email = $state('');
+  let password = $state('');
+  let error = $state('');
+  let busy = $state(false);
 
-  async function submit(): Promise<void> {
+  onMount(() => {
+    if (isSignedIn()) void goto(resolve('/'));
+  });
+
+  async function submit(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    error = '';
+    busy = true;
     try {
-      const r = await api('/v1/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password, deviceName: 'web', deviceKind: 'web' })
-      });
-      setToken(r.accessToken);
-      goto(resolve('/'));
-    } catch {
-      error = 'Login failed';
+      await login(email.trim(), password);
+      await goto(resolve('/'));
+    } catch (e) {
+      error = e instanceof ApiError ? e.message : 'Sign in failed. Try again.';
+    } finally {
+      busy = false;
     }
   }
 </script>
 
-<form on:submit|preventDefault={submit}>
-  <h1>Login</h1>
-  <input bind:value={email} placeholder="email" />
-  <input bind:value={password} type="password" placeholder="password" />
-  <button type="submit">Sign in</button>
-  {#if error}<p>{error}</p>{/if}
+<h1>Sign in</h1>
+<form onsubmit={submit}>
+  <p>
+    <label>Email <input type="email" autocomplete="username" required bind:value={email} /></label>
+  </p>
+  <p>
+    <label>Password <input type="password" autocomplete="current-password" required bind:value={password} /></label>
+  </p>
+  <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+  {#if error}<p role="alert" style="color: crimson">{error}</p>{/if}
 </form>

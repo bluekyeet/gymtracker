@@ -1,11 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
-  import { api } from '$lib/api';
-  onMount(async () => {
-    try { await api('/v1/devices'); } catch { /* ignore */ }
+  import { requireSignIn } from '$lib/guard';
+
+  let ready = $state(false);
+  onMount(() => {
+    ready = requireSignIn();
   });
 </script>
 
 <h1>Dashboard</h1>
-<p><a href={resolve('/login')}>Login</a> | <a href={resolve('/history')}>History</a> | <a href={resolve('/splits')}>Splits</a> | <a href={resolve('/devices')}>Devices</a></p>
+{#if ready}
+  <p>You are signed in. Log workouts on your phone or watch; this site shows what has synced.</p>
+  <ul>
+    <li><a href={resolve('/splits')}>Your splits and days</a></li>
+    <li><a href={resolve('/history')}>Workout history</a></li>
+    <li><a href={resolve('/devices')}>Devices</a>: see and revoke phones and watches</li>
+  </ul>
+{/if}
