@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -173,6 +174,8 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
     // Current exercise sets & input steppers
     var currentSets by remember { mutableStateOf<List<SetEntry>>(emptyList()) }
     var weightInput by remember { mutableDoubleStateOf(60.0) }
+    val uiPrefs = remember { context.getSharedPreferences("wear_ui", Context.MODE_PRIVATE) }
+    var weightStep by remember { mutableDoubleStateOf(uiPrefs.getFloat("weight_step", 2.5f).toDouble()) }
     var repsInput by remember { mutableIntStateOf(8) }
     var lastSessionSetsInfo by remember { mutableStateOf<List<SetEntry>>(emptyList()) }
     var targetSetsInfo by remember { mutableStateOf<Int?>(null) }
@@ -359,6 +362,11 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                         totalExercises = sessionExercises.size,
                         sets = currentSets,
                         weight = weightInput,
+                        weightStep = weightStep,
+                        onWeightStepChange = { step ->
+                            weightStep = step
+                            uiPrefs.edit().putFloat("weight_step", step.toFloat()).apply()
+                        },
                         reps = repsInput,
                         lastSessionSets = lastSessionSetsInfo,
                         targetSets = targetSetsInfo,
@@ -2087,6 +2095,13 @@ fun QrPairingScreen(
     }
 }
 
+/** Weight steps the watch can cycle through. 2.5 stays first-class: it is the plate-loaded default. */
+private val WEIGHT_STEPS = listOf(0.5, 1.0, 2.0, 2.5, 5.0)
+
+/** 12.0 -> "12", 62.5 -> "62.5": no trailing ".0" on a screen this small. */
+private fun formatWeight(value: Double): String =
+    if (value % 1.0 == 0.0) value.toLong().toString() else value.toString()
+
 @Composable
 fun WorkoutLoggingScreen(
     exercise: WorkoutExercise,
@@ -2094,6 +2109,8 @@ fun WorkoutLoggingScreen(
     totalExercises: Int,
     sets: List<SetEntry>,
     weight: Double,
+    weightStep: Double,
+    onWeightStepChange: (Double) -> Unit,
     reps: Int,
     lastSessionSets: List<SetEntry>,
     targetSets: Int?,
@@ -2117,7 +2134,7 @@ fun WorkoutLoggingScreen(
         modifier = Modifier
             .fillMaxSize()
             .onRotaryScrollEvent { event ->
-                val delta = if (event.verticalScrollPixels > 0) -0.5 else 0.5
+                val delta = if (event.verticalScrollPixels > 0) -weightStep else weightStep
                 onWeightChange(weight + delta)
                 true
             }
@@ -2160,7 +2177,7 @@ fun WorkoutLoggingScreen(
                     )
                 }
                 if (lastSessionSets.isNotEmpty()) {
-                    val prevText = lastSessionSets.joinToString(", ") { "${it.weightKg}kg×${it.reps}" }
+                    val prevText = lastSessionSets.joinToString(", ") { "${formatWeight(it.weightKg)}kg×${it.reps}" }
                     Text(
                         "Last: $prevText",
                         style = MaterialTheme.typography.caption3,
@@ -2188,14 +2205,27 @@ fun WorkoutLoggingScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Button(
-                    onClick = { onWeightChange(weight - 2.5) },
+                    onClick = { onWeightChange(weight - weightStep) },
                     modifier = Modifier.size(36.dp)
                 ) {
                     Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
-                Text("${weight}kg", style = MaterialTheme.typography.title3)
+                // Tap the weight to change how far + and - (and the crown) move it: 12, 14, 16 needs 2 kg.
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.clickable {
+                        onWeightStepChange(WEIGHT_STEPS[(WEIGHT_STEPS.indexOf(weightStep) + 1) % WEIGHT_STEPS.size])
+                    }
+                ) {
+                    Text("${formatWeight(weight)}kg", style = MaterialTheme.typography.title3)
+                    Text(
+                        "±${formatWeight(weightStep)} kg",
+                        style = MaterialTheme.typography.caption3,
+                        color = MaterialTheme.colors.primary
+                    )
+                }
                 Button(
-                    onClick = { onWeightChange(weight + 2.5) },
+                    onClick = { onWeightChange(weight + weightStep) },
                     modifier = Modifier.size(36.dp)
                 ) {
                     Text("+", fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -2249,7 +2279,7 @@ fun WorkoutLoggingScreen(
             val s = sets[idx]
             CompactChip(
                 onClick = { onDeleteSet(s.id) },
-                label = { Text("Set ${s.setNumber}: ${s.weightKg}kg × ${s.reps} (✕)", fontSize = 10.sp) },
+                label = { Text("Set ${s.setNumber}: ${formatWeight(s.weightKg)}kg × ${s.reps} (✕)", fontSize = 10.sp) },
                 colors = ChipDefaults.secondaryChipColors(),
                 modifier = Modifier.fillMaxWidth(0.85f).height(32.dp)
             )
