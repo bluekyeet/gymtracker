@@ -7,7 +7,10 @@ import java.time.temporal.TemporalAdjusters
 
 object Calculations {
     fun estimatedOneRepMax(weightKg: Double, reps: Int): Double? {
-        if (reps !in 1..12) return null
+        // A 0 kg set is a planned or bodyweight set, not a lift: it has no meaningful 1RM.
+        if (weightKg <= 0.0 || reps !in 1..12) return null
+        // Epley overstates a single (103.3 for 100 x 1); a one-rep set already is the max.
+        if (reps == 1) return weightKg
         return weightKg * (1.0 + reps / 30.0)
     }
 

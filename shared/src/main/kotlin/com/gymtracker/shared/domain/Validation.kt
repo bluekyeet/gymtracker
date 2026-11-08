@@ -2,7 +2,7 @@ package com.gymtracker.shared.domain
 
 object Validation {
     fun isValidWeightKg(value: Double): Boolean =
-        value in 0.0..1000.0 && (value * 100).let { it == kotlin.math.round(it) }
+        value in 0.0..1000.0 && hasAtMostTwoDecimals(value)
 
     fun isValidReps(value: Int): Boolean = value in 0..1000
 
@@ -12,4 +12,8 @@ object Validation {
         val scaled = value * 2
         return scaled == kotlin.math.round(scaled)
     }
+
+    /** `1.15 * 100` is 114.99999999999999 in doubles, so compare against the decimal text instead. */
+    private fun hasAtMostTwoDecimals(value: Double): Boolean =
+        java.math.BigDecimal.valueOf(value).stripTrailingZeros().scale() <= 2
 }
