@@ -218,6 +218,38 @@ class RepositoryTests {
         assertEquals(1, row.sets.size)
     }
 
+    @Test
+    fun lastSessionSkipsWorkoutsWhereTheExerciseWasOnlyPlannedOrSkipped() = runBlocking {
+        val bench = UUID.randomUUID()
+        val logged = workoutWith(bench, Instant.parse("2026-01-01T10:00:00Z"), 60.0 to 5, 62.5 to 5)
+        // Later workouts: pre-filled 0 kg sets never filled in, and the exercise with no sets at all.
+        workoutWith(bench, Instant.parse("2026-01-03T10:00:00Z"), 0.0 to 8, 0.0 to 8)
+        workoutWith(bench, Instant.parse("2026-01-05T10:00:00Z"))
+
+        val (session, sets) = workouts.lastSessionSets(bench, Instant.parse("2026-01-07T10:00:00Z"))!!
+        assertEquals(logged, session.id)
+        assertEquals(listOf(60.0, 62.5), sets.map { it.weightKg })
+    }
+
+    @Test
+    fun lastSessionIgnoresDeletedSetsAndLeavesOutZeroKgOnes() = runBlocking {
+        val bench = UUID.randomUUID()
+        val older = workoutWith(bench, Instant.parse("2026-01-01T10:00:00Z"), 50.0 to 5)
+        workoutWith(bench, Instant.parse("2026-01-03T10:00:00Z"), 70.0 to 5)
+        val newestSet = db.setDao().listByWorkoutExercise(
+            db.workoutExerciseDao().getBySession(
+                workouts.lastSessionSets(bench, Instant.parse("2026-01-07T10:00:00Z"))!!.first.id
+            ).first().single().id
+        ).single()
+        workouts.softDeleteSet(newestSet.id)
+        assertEquals(older, workouts.lastSessionSets(bench, Instant.parse("2026-01-07T10:00:00Z"))!!.first.id)
+
+        val mixed = workoutWith(bench, Instant.parse("2026-01-05T10:00:00Z"), 80.0 to 5, 0.0 to 5)
+        val (session, sets) = workouts.lastSessionSets(bench, Instant.parse("2026-01-07T10:00:00Z"))!!
+        assertEquals(mixed, session.id)
+        assertEquals(listOf(80.0), sets.map { it.weightKg })
+    }
+
     // --- built-in exercises --------------------------------------------------------------------------------
 
     @Test

@@ -286,6 +286,7 @@ class WorkoutRepository(private val db: AppDatabase) {
             .filter { it.exerciseId == exerciseId }
             .flatMap { db.setDao().listByWorkoutExercise(it.id) }
             .map { it.toDomain() }
+            .filter { it.weightKg > 0.0 }
         return session to sets
     }
 

@@ -120,13 +120,19 @@ interface WorkoutExerciseDao {
     @Query("SELECT * FROM workout_exercises WHERE id = :id")
     suspend fun getById(id: UUID): WorkoutExerciseEntity?
 
-    /** The most recent session, before [before], that contains [exerciseId]. */
+    /**
+     * The most recent session, before [before], in which [exerciseId] was actually logged: at least
+     * one live set above 0 kg. Sessions where it was only planned (pre-filled 0 kg sets) or skipped
+     * don't count, or they would hide the real previous weights.
+     */
     @Query(
         """
         SELECT s.id FROM workout_sessions s
         JOIN workout_exercises we ON we.sessionId = s.id
+        JOIN sets st ON st.workoutExerciseId = we.id
         WHERE we.exerciseId = :exerciseId
-          AND s.deletedAt IS NULL AND we.deletedAt IS NULL
+          AND s.deletedAt IS NULL AND we.deletedAt IS NULL AND st.deletedAt IS NULL
+          AND st.weightKg > 0
           AND s.startedAt < :before
         ORDER BY s.startedAt DESC
         LIMIT 1

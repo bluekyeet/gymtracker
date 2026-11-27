@@ -231,8 +231,8 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
         }
     }
 
-    // Watch for set changes when current exercise changes
-    LaunchedEffect(currentExercise?.id) {
+    // Watch for set changes when current exercise changes (or is swapped for another exercise)
+    LaunchedEffect(currentExercise?.id, currentExercise?.exerciseId) {
         val exId = currentExercise?.id
         val exerciseLibId = currentExercise?.exerciseId
         if (exId != null) {
@@ -442,6 +442,7 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                 onSelectExercise = { selected ->
                     scope.launch {
                         val session = activeSession ?: return@launch
+                        var addedId: UUID? = null
                         if (pickMode == "swap" && currentExercise != null) {
                             val swapped = currentExercise.copy(
                                 exerciseId = selected.id,
@@ -454,14 +455,15 @@ fun WearApp(onWorkoutActive: (Boolean) -> Unit = {}) {
                                 sessionId = session.id,
                                 exerciseId = selected.id,
                                 exerciseName = selected.name,
-                                sortKey = sessionExercises.size.toDouble()
+                                sortKey = sortKeyAfter(sessionExercises, currentExercise)
                             )
                             workoutRepo.saveExercise(newWe)
+                            addedId = newWe.id
                         }
                         val updated = workoutRepo.observeExercises(session.id).first()
                         sessionExercises = updated
-                        if (pickMode == "add") {
-                            currentExerciseIndex = updated.size - 1
+                        if (addedId != null) {
+                            currentExerciseIndex = updated.indexOfFirst { it.id == addedId }.coerceAtLeast(0)
                         }
                         navigateBack()
                     }
@@ -2097,6 +2099,17 @@ fun QrPairingScreen(
 
 /** Weight steps the watch can cycle through. 2.5 stays first-class: it is the plate-loaded default. */
 private val WEIGHT_STEPS = listOf(0.5, 1.0, 2.0, 2.5, 5.0)
+
+/**
+ * Sort key that places a new exercise straight after [current]: halfway to the next one, or one past
+ * it when it is last. With no current exercise the new one goes at the end.
+ */
+private fun sortKeyAfter(exercises: List<WorkoutExercise>, current: WorkoutExercise?): Double {
+    val sorted = exercises.sortedBy { it.sortKey }
+    if (current == null) return (sorted.lastOrNull()?.sortKey ?: -1.0) + 1.0
+    val next = sorted.firstOrNull { it.sortKey > current.sortKey }
+    return if (next == null) current.sortKey + 1.0 else (current.sortKey + next.sortKey) / 2.0
+}
 
 /** 12.0 -> "12", 62.5 -> "62.5": no trailing ".0" on a screen this small. */
 private fun formatWeight(value: Double): String =
